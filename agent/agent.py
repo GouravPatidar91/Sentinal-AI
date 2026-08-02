@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 # Load agent environment variables
 load_dotenv()
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000/api/logs/ingest")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://sentinal-ai-gr33.onrender.com/api/logs/ingest")
 HOST_NAME = os.getenv("HOST_NAME", socket.gethostname().lower())
 SYSLOG_PORT = int(os.getenv("SYSLOG_PORT", "5140"))  # Default 5140 (non-root port) for firewall syslog receipt
 
