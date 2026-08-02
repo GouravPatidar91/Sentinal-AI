@@ -1,4 +1,5 @@
 import os
+import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -109,4 +110,16 @@ def read_root():
         "platform": settings.PROJECT_NAME,
         "api_docs": "/docs",
         "version": "1.0.0"
+    }
+
+@app.get("/health")
+@app.get("/api/health")
+@app.get("/ping")
+@app.get("/api/ping")
+def health_check():
+    """Health check webhook endpoint for cron job / uptime ping monitors (e.g. cron-job.org / UptimeRobot)."""
+    return {
+        "status": "healthy",
+        "service": settings.PROJECT_NAME,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }
