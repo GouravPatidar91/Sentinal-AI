@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: sentinelai-backend:latest
+    container_name: sentinelai-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mounts local folder to persist SQLite database
+      - ./database:/src/database
+    environment:
+      - SECRET_KEY=DOCKER_COMPOSE_SUPER_SECRET_STRING_2026
+      - DATABASE_URL=sqlite:////src/database/sentinel.db
+      - AI_PROVIDER=gemini
+      - GEMINI_API_KEY=
+    restart: always
