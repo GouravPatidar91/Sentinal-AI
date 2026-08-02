@@ -15,11 +15,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./database/sentinel.db"
     
     # AI Providers
+    OPENROUTER_API_KEY: Optional[str] = os.getenv("OPENROUTER_API_KEY")
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     OLLAMA_URL: str = "http://localhost:11434"
-    AI_PROVIDER: str = "gemini"  # gemini, openai, ollama
-    AI_MODEL: Optional[str] = None  # e.g. gemini-1.5-flash or gpt-4o-mini
+    AI_PROVIDER: str = "openrouter"  # openrouter, gemini, openai, ollama
+    AI_MODEL: Optional[str] = "meta-llama/llama-3.3-70b-instruct:free"  # e.g. meta-llama/llama-3.3-70b-instruct:free or google/gemini-2.0-flash-lite-preview-02-05:free
     
     # Notifications / Email (Mocked by default)
     SMTP_SERVER: str = "localhost"

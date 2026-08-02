@@ -11,8 +11,10 @@ services:
       - key: DATABASE_URL
         value: sqlite:////src/database/sentinel.db
       - key: AI_PROVIDER
-        value: gemini
-      - key: GEMINI_API_KEY
+        value: openrouter
+      - key: OPENROUTER_API_KEY
         sync: false
+      - key: AI_MODEL
+        value: meta-llama/llama-3.3-70b-instruct:free
       - key: ALLOWED_ORIGINS
         value: "*"

@@ -1,6 +1,7 @@
 import json
+import os
 import httpx
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from backend.app.core.config import settings
 from backend.app.models.models import Incident, IncidentEvent
 
@@ -71,19 +72,66 @@ class AIInvestigator:
         provider = settings.AI_PROVIDER.lower()
         
         try:
-            if provider == "gemini":
+            if provider in ["openrouter", "open_router"]:
+                return await self._query_openrouter(prompt)
+            elif provider == "gemini":
                 return await self._query_gemini(prompt)
             elif provider == "openai":
                 return await self._query_openai(prompt)
             elif provider == "ollama":
                 return await self._query_ollama(prompt)
             else:
-                # Mock fallback if no provider is configured or available
+                # Default to openrouter if key is present
+                if settings.OPENROUTER_API_KEY or os.getenv("OPENROUTER_API_KEY"):
+                    return await self._query_openrouter(prompt)
                 return self._generate_mock_investigation(incident)
         except Exception as e:
             print(f"AI investigation request failed via {provider}: {e}")
             # Graceful fallback to mock report to avoid breaking the application
             return self._generate_mock_investigation(incident, error=str(e))
+
+    async def _query_openrouter(self, prompt: str) -> str:
+        """Queries OpenRouter API (OpenAI-compatible) using high-performance free models."""
+        key = settings.OPENROUTER_API_KEY or os.getenv("OPENROUTER_API_KEY")
+        if not key:
+            raise ValueError("OPENROUTER_API_KEY is not set in environment variables.")
+            
+        model = settings.AI_MODEL or "meta-llama/llama-3.3-70b-instruct:free"
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+            "HTTP-Referer": "https://github.com/GouravPatidar91/Sentinal-AI",
+            "X-Title": "SentinelAI SOC"
+        }
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2
+        }
+        
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code != 200:
+                raise Exception(f"OpenRouter API returned status {resp.status_code}: {resp.text}")
+                
+            resp_data = resp.json()
+            text = resp_data["choices"][0]["message"]["content"]
+            
+            # Clean Markdown formatting wrappers if present
+            cleaned_text = text.strip()
+            if cleaned_text.startswith("```"):
+                lines = cleaned_text.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                cleaned_text = "\n".join(lines).strip()
+
+            parsed = json.loads(cleaned_text)
+            return json.dumps(parsed, indent=2)
 
     async def _query_gemini(self, prompt: str) -> str:
         """Queries the Gemini API."""
