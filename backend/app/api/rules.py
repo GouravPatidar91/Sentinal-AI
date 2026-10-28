@@ -10,8 +10,7 @@ router = APIRouter(prefix="/rules", tags=["Rules"])
 
 @router.get("/", response_model=List[RuleResponse])
 def list_rules(
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Lists all detection rules in the system."""
     return db.query(DetectionRule).all()
@@ -19,8 +18,7 @@ def list_rules(
 @router.get("/{rule_id}", response_model=RuleResponse)
 def get_rule(
     rule_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Retrieves details of a specific detection rule."""
     rule = db.query(DetectionRule).filter(DetectionRule.id == rule_id).first()

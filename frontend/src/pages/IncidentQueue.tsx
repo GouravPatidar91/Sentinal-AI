@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertOctagon, Filter, Search } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { API_BASE, WS_BASE } from "../config/api";
+import { formatDateTime } from "../utils/time";
 
 interface Incident {
   id: number;
@@ -49,13 +49,14 @@ export const IncidentQueue: React.FC = () => {
     return () => {
       ws.close();
     };
-  }, []);
+  }, [token]);
 
   const fetchIncidents = async () => {
     setLoading(true);
+    const activeToken = token || localStorage.getItem("token");
     try {
-      const resp = await fetch(`${API_BASE}/api/incidents`, {
-        headers: { "Authorization": `Bearer ${token}` }
+      const resp = await fetch(`${API_BASE}/api/incidents/`, {
+        headers: { "Authorization": `Bearer ${activeToken}` }
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -68,12 +69,21 @@ export const IncidentQueue: React.FC = () => {
     }
   };
 
-  const getSeverityBg = (sev: string) => {
+  const renderAsciiMeter = (val: number, max: number, chars = 8) => {
+    const filled = Math.min(chars, Math.max(0, Math.round((val / max) * chars)));
+    return "█".repeat(filled) + "░".repeat(chars - filled);
+  };
+
+  const getSeverityBadge = (sev: string) => {
     switch (sev.toUpperCase()) {
-      case "CRITICAL": return "bg-red-500/10 text-red-400 border-red-500/20";
-      case "HIGH": return "bg-orange-500/10 text-orange-400 border-orange-500/20";
-      case "MEDIUM": return "bg-yellow-500/10 text-yellow-400 border-yellow-500/20";
-      default: return "bg-blue-500/10 text-blue-400 border-blue-500/20";
+      case "CRITICAL":
+        return <span className="bg-[#66ff66] text-[#000000] font-bold px-1.5 py-0.5 select-none">[CRITICAL]</span>;
+      case "HIGH":
+        return <span className="text-[#ffffff] border border-[#66ff66] px-1.5 py-0.5 select-none">[HIGH]</span>;
+      case "MEDIUM":
+        return <span className="text-[#66ff66] border border-[#255325] px-1.5 py-0.5 select-none">[MEDIUM]</span>;
+      default:
+        return <span className="text-[#58ca58] border border-[#255325] px-1.5 py-0.5 select-none">[LOW]</span>;
     }
   };
 
@@ -96,171 +106,264 @@ export const IncidentQueue: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 p-8 space-y-8 overflow-y-auto h-screen max-w-[calc(100vw-16rem)]">
+    <div className="flex-1 min-w-0 p-6 space-y-6 overflow-y-auto h-screen bg-[#000000] text-[#66ff66] font-mono select-text">
       
-      {/* Title */}
-      <div className="flex justify-between items-center border-b border-darkBorder pb-6">
-        <div>
-          <h2 className="text-3xl font-extrabold text-slate-100 tracking-wide flex items-center gap-3">
-            <AlertOctagon className="w-8 h-8 text-red-500" />
-            INCIDENT QUEUE
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Review, prioritize, and investigate aggregated cybersecurity threat logs
-          </p>
+      {/* Top Command Session Bar & Title */}
+      <div className="border border-[#255325] p-4 bg-[#000000]">
+        <div className="flex items-center justify-between text-[13px] border-b border-[#255325] pb-2 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[#255325] select-none">[00]</span>
+            <span className="text-[#66ff66]">
+              <span className="text-[#58ca58]">sentinel@soc:~$</span> sentinel --query incidents --status all --sort risk:desc
+            </span>
+          </div>
+          <span className="px-2 py-0.5 bg-[#66ff66] text-[#000000] font-medium text-[11px] select-none">
+            [ CHANNEL: 02 // INCIDENTS ]
+          </span>
+        </div>
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+          <div>
+            <h1 className="text-[22px] sm:text-[26px] font-medium text-[#ffffff] tracking-tight uppercase">
+              Correlated Incident Queue // Triage Readout
+            </h1>
+            <p className="text-[14px] text-[#58ca58] mt-1">
+              Real-time multi-stage threat correlation, automated risk scoring, and MITRE ATT&amp;CK TTP aggregation.
+            </p>
+          </div>
+          <div className="text-[12px] text-[#58ca58] text-right font-mono shrink-0">
+            <div>QUEUE_STATE: <span className="text-[#ffffff]">SYNCHRONIZED</span></div>
+            <div>SOCKET: <span className="text-[#66ff66]">ESTABLISHED (1000ms)</span></div>
+          </div>
         </div>
       </div>
 
-      {/* Stats Counters */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="glass-card rounded-xl p-5 border flex flex-col justify-center">
-          <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">Total Incidents</span>
-          <span className="text-3xl font-bold text-slate-100 mt-1">{stats.total}</span>
+      {/* Metrics Counters */}
+      <div>
+        <div className="text-[12px] text-[#255325] mb-2 select-none">
+          [01] $ sentinel --stats incidents --summary
         </div>
-        <div className="glass-card rounded-xl p-5 border flex flex-col justify-center">
-          <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">Untriaged (New)</span>
-          <span className="text-3xl font-bold text-blue-400 mt-1">{stats.new}</span>
-        </div>
-        <div className="glass-card rounded-xl p-5 border flex flex-col justify-center">
-          <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">Active Investigations</span>
-          <span className="text-3xl font-bold text-orange-400 mt-1">{stats.active}</span>
-        </div>
-        <div className="glass-card rounded-xl p-5 border flex flex-col justify-center">
-          <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">Critical Threats</span>
-          <span className="text-3xl font-bold text-red-500 mt-1">{stats.critical}</span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="border border-[#255325] p-4 bg-[#000000] flex flex-col justify-between">
+            <div>
+              <div className="text-[11px] text-[#58ca58] uppercase">01. TOTAL_RECORDED</div>
+              <div className="text-[26px] font-medium text-[#ffffff] mt-1">{stats.total}</div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-[#255325] text-[11px] text-[#58ca58] flex justify-between">
+              <span>LEDGER:</span>
+              <span className="text-[#66ff66]">DATABASE_SYNCED</span>
+            </div>
+          </div>
+
+          <div className="border border-[#255325] p-4 bg-[#000000] flex flex-col justify-between">
+            <div>
+              <div className="text-[11px] text-[#58ca58] uppercase">02. UNTRIAGED_NEW</div>
+              <div className={`text-[26px] font-medium mt-1 ${stats.new > 0 ? "text-[#ffffff]" : "text-[#58ca58]"}`}>
+                {stats.new}
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-[#255325] text-[11px] text-[#58ca58] flex justify-between">
+              <span>STATUS:</span>
+              <span className={stats.new > 0 ? "text-[#ffffff]" : "text-[#58ca58]"}>
+                {stats.new > 0 ? "AWAITING_REVIEW" : "ALL_TRIAGED"}
+              </span>
+            </div>
+          </div>
+
+          <div className="border border-[#255325] p-4 bg-[#000000] flex flex-col justify-between">
+            <div>
+              <div className="text-[11px] text-[#58ca58] uppercase">03. ACTIVE_INVESTIGATING</div>
+              <div className="text-[26px] font-medium text-[#ffffff] mt-1">{stats.active}</div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-[#255325] text-[11px] text-[#58ca58] flex justify-between">
+              <span>WORKFLOW:</span>
+              <span className="text-[#66ff66]">PIPELINE_IN_PROGRESS</span>
+            </div>
+          </div>
+
+          <div className="border border-[#255325] p-4 bg-[#000000] flex flex-col justify-between">
+            <div>
+              <div className="text-[11px] text-[#58ca58] uppercase">04. SEV_CRITICAL</div>
+              <div className={`text-[26px] font-medium mt-1 ${stats.critical > 0 ? "text-[#ffffff]" : "text-[#58ca58]"}`}>
+                {stats.critical}
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-[#255325] text-[11px] text-[#58ca58] flex justify-between">
+              <span>ALERT_LEVEL:</span>
+              <span className={stats.critical > 0 ? "text-[#ffffff]" : "text-[#58ca58]"}>
+                {stats.critical > 0 ? "PRIORITY_ONE" : "ZERO_CRITICAL"}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="glass-card rounded-xl p-4 border flex flex-col md:flex-row gap-4 justify-between items-center">
-        
-        {/* Search */}
-        <div className="relative w-full md:w-80">
-          <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
-            <Search className="w-4 h-4 text-slate-500" />
-          </span>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search incident title, host or ID..."
-            className="w-full bg-slate-950 border border-darkBorder rounded-lg py-2 pl-10 pr-4 text-xs text-slate-200 outline-none focus:border-blue-500 transition-colors"
-          />
+      <div>
+        <div className="text-[12px] text-[#255325] mb-2 select-none">
+          [02] $ sentinel --filter-queue --query "{search || '*'}" --status {statusFilter} --severity {severityFilter}
         </div>
-
-        {/* Filters */}
-        <div className="flex flex-wrap gap-4 w-full md:w-auto justify-end">
-          <div className="flex items-center gap-2">
-            <Filter className="w-3.5 h-3.5 text-slate-500" />
-            <span className="text-xs text-slate-400">Status:</span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-slate-950 border border-darkBorder rounded py-1.5 px-3 text-xs text-slate-300 outline-none cursor-pointer"
-            >
-              <option value="All">All Statuses</option>
-              <option value="New">New</option>
-              <option value="Investigating">Investigating</option>
-              <option value="Contained">Contained</option>
-              <option value="Resolved">Resolved</option>
-              <option value="Closed">Closed</option>
-            </select>
+        <div className="border border-[#255325] p-3 bg-[#000000] flex flex-col md:flex-row gap-3 justify-between items-stretch md:items-center">
+          
+          <div className="flex items-center gap-2 flex-1 max-w-md border border-[#255325] px-3 py-1.5 bg-[#000000]">
+            <span className="text-[#58ca58] text-[12px] select-none">&gt;</span>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="SEARCH_QUERY: title, host, or INC-ID..."
+              className="bg-transparent border-none outline-none text-[#ffffff] placeholder-[#255325] text-[12px] w-full font-mono"
+            />
+            {search && (
+              <button 
+                onClick={() => setSearch("")} 
+                className="text-[#58ca58] hover:text-[#ffffff] text-[11px]"
+              >
+                [✕]
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400">Severity:</span>
-            <select
-              value={severityFilter}
-              onChange={(e) => setSeverityFilter(e.target.value)}
-              className="bg-slate-950 border border-darkBorder rounded py-1.5 px-3 text-xs text-slate-300 outline-none cursor-pointer"
-            >
-              <option value="All">All Severities</option>
-              <option value="CRITICAL">CRITICAL</option>
-              <option value="HIGH">HIGH</option>
-              <option value="WARNING">WARNING</option>
-              <option value="INFO">INFO</option>
-            </select>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 text-[12px]">
+              <span className="text-[#58ca58]">STATUS:</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="bg-[#000000] border border-[#255325] text-[#66ff66] px-2 py-1 text-[11px] outline-none cursor-pointer hover:border-[#66ff66] transition-colors"
+              >
+                <option value="All">[ALL_STATUSES]</option>
+                <option value="New">[NEW]</option>
+                <option value="Investigating">[INVESTIGATING]</option>
+                <option value="Contained">[CONTAINED]</option>
+                <option value="Resolved">[RESOLVED]</option>
+                <option value="Closed">[CLOSED]</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-[12px]">
+              <span className="text-[#58ca58]">SEVERITY:</span>
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value)}
+                className="bg-[#000000] border border-[#255325] text-[#66ff66] px-2 py-1 text-[11px] outline-none cursor-pointer hover:border-[#66ff66] transition-colors"
+              >
+                <option value="All">[ALL_SEVERITIES]</option>
+                <option value="CRITICAL">[CRITICAL]</option>
+                <option value="HIGH">[HIGH]</option>
+                <option value="MEDIUM">[MEDIUM]</option>
+                <option value="LOW">[LOW]</option>
+              </select>
+            </div>
+
+            {(search || statusFilter !== "All" || severityFilter !== "All") && (
+              <button
+                onClick={() => { setSearch(""); setStatusFilter("All"); setSeverityFilter("All"); }}
+                className="text-[11px] px-2 py-1 border border-[#255325] text-[#58ca58] hover:text-[#ffffff] hover:border-[#66ff66] transition-colors cursor-pointer"
+              >
+                [ RESET_FILTERS ]
+              </button>
+            )}
           </div>
         </div>
-
       </div>
 
       {/* Main Table */}
-      <div className="glass-card rounded-xl p-6 border">
-        {loading ? (
-          <div className="py-12 text-center text-slate-400 font-medium">Loading threat incidents...</div>
-        ) : filteredIncidents.length === 0 ? (
-          <div className="py-12 text-center text-slate-500">
-            No incidents match the active search/filters.
+      <div>
+        <div className="text-[12px] text-[#255325] mb-2 select-none">
+          [03] $ sentinel --render table --view triage
+        </div>
+
+        <div className="border border-[#255325] bg-[#000000] p-4">
+          <div className="border-b border-[#255325] pb-2 mb-3 flex justify-between items-center text-[12px]">
+            <span className="text-[#ffffff] font-medium">
+              MATCHING_INCIDENTS_TABLE // COUNT: {filteredIncidents.length}
+            </span>
+            <span className="text-[#58ca58]">
+              AUTO_SORT: RISK_SCORE_DESC
+            </span>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-darkBorder text-slate-500 font-semibold uppercase tracking-wider">
-                  <th className="pb-3 w-20">ID</th>
-                  <th className="pb-3">Incident Title</th>
-                  <th className="pb-3 w-32">Severity</th>
-                  <th className="pb-3 w-32">Risk Score</th>
-                  <th className="pb-3 w-32">Status</th>
-                  <th className="pb-3 w-40">Created At</th>
-                  <th className="pb-3 w-24">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-darkBorder">
-                {filteredIncidents.map((inc) => (
-                  <tr key={inc.id} className="hover:bg-slate-900/30 transition-colors">
-                    <td className="py-4 font-mono text-slate-400">INC-{inc.id}</td>
-                    <td className="py-4 pr-4">
-                      <span className="font-semibold text-slate-200 block text-sm">{inc.title}</span>
-                      <span className="text-slate-500 text-[10px] mt-0.5 block truncate max-w-lg">{inc.description}</span>
-                    </td>
-                    <td className="py-4">
-                      <span className={`px-2 py-0.5 rounded border text-[10px] font-bold tracking-wide ${getSeverityBg(inc.severity)}`}>
-                        {inc.severity}
-                      </span>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-200">{inc.risk_score}</span>
-                        <div className="w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full ${
-                              inc.risk_score > 75 ? "bg-red-500 animate-pulse" :
-                              inc.risk_score > 40 ? "bg-orange-500" : "bg-yellow-500"
-                            }`}
-                            style={{ width: `${inc.risk_score}%` }}
-                          />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <span className={`font-semibold ${
-                        inc.status === "New" ? "text-blue-400" : 
-                        inc.status === "Investigating" ? "text-orange-400 animate-pulse" : 
-                        inc.status === "Resolved" ? "text-emerald-400" : "text-slate-500"
-                      }`}>{inc.status}</span>
-                    </td>
-                    <td className="py-4 text-slate-400 font-mono">
-                      {new Date(inc.created_at).toLocaleString()}
-                    </td>
-                    <td className="py-4">
-                      <Link
-                        to={`/incidents/${inc.id}`}
-                        className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded font-bold tracking-wide shadow-md shadow-blue-500/10 hover:shadow-blue-500/25 transition-all text-[11px]"
-                      >
-                        Investigate
-                      </Link>
-                    </td>
+
+          {loading ? (
+            <div className="py-12 text-center text-[#58ca58] font-mono text-[13px]">
+              &gt; Loading incident correlation ledger from database...
+            </div>
+          ) : filteredIncidents.length === 0 ? (
+            <div className="py-12 text-center text-[#255325] font-mono text-[13px]">
+              [ - ] No security incidents matched the active query filters.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[12px] border-collapse font-mono">
+                <thead>
+                  <tr className="border-b border-[#255325] text-[#58ca58] text-[11px] uppercase tracking-wider">
+                    <th className="pb-2 w-20"># ID</th>
+                    <th className="pb-2">INCIDENT_NAME &amp; DESCRIPTION</th>
+                    <th className="pb-2 w-28">SEVERITY</th>
+                    <th className="pb-2 w-36">RISK_METER</th>
+                    <th className="pb-2 w-28">STATUS</th>
+                    <th className="pb-2 w-44">TIMESTAMP</th>
+                    <th className="pb-2 w-28 text-right">ACTION</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody className="divide-y divide-[#255325]">
+                  {filteredIncidents.map((inc) => (
+                    <tr key={inc.id} className="hover:bg-[#255325]/20 transition-colors">
+                      <td className="py-3 font-mono text-[#ffffff] font-medium">
+                        INC-{inc.id}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <span className="font-medium text-[#ffffff] block">
+                          {inc.title}
+                        </span>
+                        <span className="text-[#58ca58] text-[11px] block truncate max-w-xl">
+                          {inc.description}
+                        </span>
+                      </td>
+                      <td className="py-3">
+                        {getSeverityBadge(inc.severity)}
+                      </td>
+                      <td className="py-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[11px] ${inc.risk_score >= 70 ? "text-[#ffffff]" : "text-[#66ff66]"}`}>
+                            [{renderAsciiMeter(inc.risk_score, 100, 8)}]
+                          </span>
+                          <span className="text-[#58ca58] text-[11px]">
+                            {inc.risk_score}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <span className={`text-[11px] font-medium ${
+                          inc.status === "New" ? "text-[#ffffff]" : 
+                          inc.status === "Investigating" ? "text-[#66ff66]" : 
+                          inc.status === "Resolved" ? "text-[#58ca58]" : "text-[#255325]"
+                        }`}>
+                          [{inc.status.toUpperCase()}]
+                        </span>
+                      </td>
+                      <td className="py-3 text-[#58ca58] text-[11px] font-mono">
+                        {formatDateTime(inc.created_at)}
+                      </td>
+                      <td className="py-3 text-right">
+                        <Link
+                          to={`/incidents/${inc.id}`}
+                          className="px-2.5 py-1 border border-[#255325] text-[#58ca58] hover:text-[#000000] hover:bg-[#66ff66] hover:border-[#66ff66] transition-colors text-[11px] font-medium inline-block select-none"
+                        >
+                          [ INVESTIGATE ↵ ]
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
     </div>
   );
 };
+
 export default IncidentQueue;

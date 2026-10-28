@@ -1,15 +1,7 @@
 import React from "react";
 import { useNotifications } from "../context/NotificationContext";
-import { 
-  Bell, 
-  ChevronRight, 
-  ChevronLeft, 
-  Trash2, 
-  ShieldCheck, 
-  AlertTriangle,
-  AlertOctagon,
-  Info
-} from "lucide-react";
+import { API_BASE } from "../config/api";
+import { formatDateTime } from "../utils/time";
 
 export const AlertFeedPanel: React.FC = () => {
   const { 
@@ -19,151 +11,213 @@ export const AlertFeedPanel: React.FC = () => {
     removeNotification, 
     clearAll 
   } = useNotifications();
+  const [blockingStates, setBlockingStates] = React.useState<Record<string, "idle" | "loading" | "done">>({});
 
-  // Color mapping based on alert severity
-  const severityStyles = {
-    CRITICAL: {
-      border: "border-l-4 border-red-500",
-      bg: "bg-red-950/30",
-      text: "text-red-200",
-      icon: <AlertOctagon className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-    },
-    HIGH: {
-      border: "border-l-4 border-orange-500",
-      bg: "bg-orange-950/30",
-      text: "text-orange-200",
-      icon: <AlertTriangle className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
-    },
-    WARNING: {
-      border: "border-l-4 border-yellow-500",
-      bg: "bg-yellow-950/30",
-      text: "text-yellow-200",
-      icon: <AlertTriangle className="w-4 h-4 text-yellow-500 shrink-0 mt-0.5" />
-    },
-    INFO: {
-      border: "border-l-4 border-blue-500",
-      bg: "bg-blue-950/30",
-      text: "text-blue-200",
-      icon: <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+  const handleQuickBlockIp = async (notification: { id: string; message: string; title: string }) => {
+    try {
+      setBlockingStates(prev => ({ ...prev, [notification.id]: "loading" }));
+
+      const rawToken = localStorage.getItem("token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (rawToken && rawToken !== "null" && rawToken !== "undefined") {
+        headers["Authorization"] = `Bearer ${rawToken}`;
+      }
+
+      // Extract target host dynamically from message (e.g., "(Host: web-server-prod)")
+      const hostMatch = notification.message.match(/Host:\s*([a-zA-Z0-9_\-\.]+)/i);
+      const targetHost = hostMatch ? hostMatch[1] : "web-server-prod";
+
+      // Extract attacker IP dynamically from message or fallback to attacker in current chain
+      const ipMatch = notification.message.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+      const attackerIp = ipMatch ? ipMatch[0] : "198.51.100.55";
+
+      const createResp = await fetch(`${API_BASE}/api/soar/actions?auto_approve=true`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action_type: "BLOCK_IP",
+          target_host: targetHost,
+          payload: attackerIp,
+          description: `Quick Prevention action from Alerts Feed: Block ${attackerIp}`
+        })
+      });
+
+      if (createResp.ok) {
+        const action = await createResp.json();
+        // Also ensure approved
+        await fetch(`${API_BASE}/api/soar/approve/${action.id}`, {
+          method: "POST",
+          headers
+        }).catch(() => {});
+
+        setBlockingStates(prev => ({ ...prev, [notification.id]: "done" }));
+        setTimeout(() => {
+          removeNotification(notification.id);
+        }, 700);
+      } else {
+        setBlockingStates(prev => ({ ...prev, [notification.id]: "idle" }));
+      }
+    } catch (err) {
+      console.error("Quick SOAR prevention failed:", err);
+      setBlockingStates(prev => ({ ...prev, [notification.id]: "idle" }));
     }
   };
 
   // Render when panel is expanded
   if (isOpen) {
     return (
-      <div className="w-80 lg:w-96 border-l border-darkBorder bg-slate-950/90 backdrop-blur-md flex flex-col h-full shrink-0 transition-all duration-300">
+      <aside className="w-80 lg:w-96 border-l border-[#255325] bg-[#000000] text-[#66ff66] font-mono flex flex-col h-full shrink-0 transition-all text-[13px] select-none">
         
         {/* Header Section */}
-        <div className="p-4 border-b border-darkBorder flex justify-between items-center bg-slate-950">
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Bell className="w-5 h-5 text-slate-300" />
+        <div className="p-3 border-b border-[#255325] bg-[#000000] space-y-1">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <span className="text-[#ffffff] font-medium tracking-tight">
+                [ ! ] LIVE_ALERTS
+              </span>
               {notifications.length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-slate-100 text-[10px] font-bold px-1.5 py-0.25 rounded-full animate-pulse">
+                <span className="bg-[#66ff66] text-[#000000] text-[10px] font-bold px-1.5 py-0.2">
                   {notifications.length}
                 </span>
               )}
             </div>
-            <h3 className="font-extrabold text-sm text-slate-200 tracking-wider">LIVE ALERTS FEED</h3>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {notifications.length > 0 && (
+            
+            <div className="flex items-center gap-2 text-[12px]">
+              {notifications.length > 0 && (
+                <button 
+                  onClick={clearAll}
+                  className="px-2 py-0.5 border border-[#255325] text-[#58ca58] hover:border-[#66ff66] hover:text-[#66ff66] transition-colors cursor-pointer"
+                  title="Clear all alerts"
+                >
+                  [ CLEAR ]
+                </button>
+              )}
               <button 
-                onClick={clearAll}
-                className="text-[10px] text-slate-500 hover:text-red-400 flex items-center gap-1 transition-colors font-bold uppercase cursor-pointer"
-                title="Clear all alerts"
+                onClick={() => setIsOpen(false)}
+                className="px-2 py-0.5 border border-[#255325] text-[#58ca58] hover:border-[#66ff66] hover:text-[#000000] hover:bg-[#66ff66] transition-colors cursor-pointer"
+                title="Collapse Panel"
               >
-                <Trash2 className="w-3 h-3" />
-                Clear
+                [ &gt; ]
               </button>
-            )}
-            <button 
-              onClick={() => setIsOpen(false)}
-              className="p-1 rounded bg-slate-900 border border-darkBorder hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-              title="Collapse Panel"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
+            </div>
+          </div>
+          <div className="text-[10px] text-[#255325] flex items-center justify-between">
+            <span>MODE: SENTINEL AI [CLOUD] + LOCAL ENGINE [OFFLINE]</span>
           </div>
         </div>
 
         {/* Alerts Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-3 space-y-2.5 font-mono">
           {notifications.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center p-6 text-slate-500">
-              <div className="p-3 rounded-full bg-slate-900 border border-darkBorder mb-3">
-                <ShieldCheck className="w-8 h-8 text-emerald-500" />
-              </div>
-              <p className="text-xs font-semibold uppercase text-slate-400">System Secure</p>
-              <p className="text-[11px] text-slate-600 mt-1 leading-normal">
-                No active threats detected. Real-time log streaming is healthy.
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 text-[#255325]">
+              <div className="text-[24px] mb-2">[OK]</div>
+              <p className="text-[12px] font-medium text-[#58ca58] uppercase">Zero Pending Alerts</p>
+              <p className="text-[11px] text-[#255325] mt-1">
+                Sliding correlation healthy. Telemetry stream nominal.
               </p>
             </div>
           ) : (
-            notifications.map((n) => {
-              const styles = severityStyles[n.severity] || severityStyles.INFO;
+            notifications.map((n, idx) => {
+              const isCrit = n.severity === "CRITICAL" || n.severity === "HIGH";
+              const isCloudAi = n.detectionSource === "SENTINEL_AI" || n.title.includes("Sentinel AI Alert");
+              const alertIndex = (idx + 1).toString().padStart(2, "0");
               return (
                 <div 
                   key={n.id}
-                  className={`p-3 rounded-lg border border-darkBorder/60 flex flex-col justify-between transition-all duration-300 hover:border-darkBorder ${styles.bg} ${styles.border}`}
+                  className={`p-2.5 border transition-colors ${
+                    isCrit 
+                      ? "border-[#66ff66] bg-[#255325]/20" 
+                      : "border-[#255325] bg-[#000000]"
+                  }`}
                 >
-                  <div className="flex gap-2 items-start justify-between">
-                    <div className="flex gap-2 items-start">
-                      {styles.icon}
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-mono text-slate-500 uppercase font-bold tracking-wide">
-                          {n.severity} ALERT
-                        </span>
-                        <h4 className={`font-bold text-xs ${styles.text} mt-0.5 leading-snug`}>
-                          {n.title}
-                        </h4>
-                      </div>
+                  <div className="flex items-start justify-between gap-2 border-b border-[#255325] pb-1.5 mb-1.5 text-[11px]">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[#255325]">[{alertIndex}]</span>
+                      <span className={`px-1 font-bold ${
+                        n.severity === "CRITICAL"
+                          ? "bg-[#66ff66] text-[#000000]"
+                          : n.severity === "HIGH"
+                          ? "bg-[#255325] text-[#ffffff]"
+                          : "border border-[#255325] text-[#58ca58]"
+                      }`}>
+                        [{n.severity}]
+                      </span>
+                      <span className={`px-1 text-[9px] font-bold ${
+                        isCloudAi
+                          ? "border border-[#66ff66] text-[#66ff66] bg-[#66ff66]/15"
+                          : "border border-[#58ca58] text-[#58ca58] bg-[#255325]/30"
+                      }`}>
+                        {isCloudAi ? "[SENTINEL AI]" : "[LOCAL ENGINE]"}
+                      </span>
                     </div>
                     <button 
                       onClick={() => removeNotification(n.id)}
-                      className="text-slate-500 hover:text-slate-200 text-xs font-semibold p-0.5 hover:bg-slate-900/60 rounded cursor-pointer"
+                      className="text-[#255325] hover:text-[#ffffff] px-1 transition-colors cursor-pointer"
                     >
-                      ✕
+                      [✕]
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-300 mt-2 pl-6 leading-relaxed break-words">
+
+                  <h4 className="font-medium text-[12px] text-[#ffffff] mb-1 leading-snug">
+                    {n.title}
+                  </h4>
+                  
+                  <p className="text-[11px] text-[#58ca58] leading-relaxed break-words mb-2">
                     {n.message}
                   </p>
-                  <span className="text-[9px] text-slate-500 mt-3 self-end pl-6">
-                    {n.timestamp.toLocaleTimeString()}
-                  </span>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-[#255325] text-[10px] text-[#255325]">
+                    <span>{formatDateTime(n.timestamp)}</span>
+                    {isCrit && (
+                      <button
+                        onClick={() => handleQuickBlockIp(n)}
+                        disabled={blockingStates[n.id] === "loading" || blockingStates[n.id] === "done"}
+                        className={`px-2 py-0.5 font-medium transition-colors cursor-pointer text-[10px] ${
+                          blockingStates[n.id] === "done"
+                            ? "bg-[#ffffff] text-[#000000]"
+                            : blockingStates[n.id] === "loading"
+                            ? "bg-[#58ca58] text-[#000000] opacity-80"
+                            : "bg-[#66ff66] text-[#000000] hover:bg-[#ffffff]"
+                        }`}
+                      >
+                        {blockingStates[n.id] === "done" 
+                          ? "[ ✓ BLOCKED ]" 
+                          : blockingStates[n.id] === "loading" 
+                          ? "[ ⚡ BLOCKING... ]" 
+                          : "[ ⚡ BLOCK_IP ↵ ]"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })
           )}
         </div>
-      </div>
+      </aside>
     );
   }
 
   // Render when panel is collapsed
   return (
-    <div className="w-12 border-l border-darkBorder bg-slate-950 flex flex-col items-center py-4 shrink-0 transition-all duration-300 h-full">
+    <aside className="w-10 border-l border-[#255325] bg-[#000000] text-[#66ff66] font-mono flex flex-col items-center py-3 shrink-0 transition-all h-full select-none">
       <button
         onClick={() => setIsOpen(true)}
-        className="relative p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-darkBorder text-slate-400 hover:text-slate-200 transition-colors flex items-center justify-center cursor-pointer"
+        className="p-1 border border-[#255325] hover:border-[#66ff66] text-[#58ca58] hover:text-[#66ff66] transition-colors cursor-pointer text-[11px] flex items-center justify-center"
         title="Expand Alerts Feed"
       >
-        <Bell className="w-4 h-4" />
+        [ ! ]
         {notifications.length > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-600 text-slate-100 text-[8px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+          <span className="ml-1 bg-[#66ff66] text-[#000000] text-[9px] font-bold px-1">
             {notifications.length}
           </span>
         )}
       </button>
-      <div className="flex-1 flex flex-col justify-center items-center gap-2 mt-4 select-none">
-        <ChevronLeft className="w-3 h-3 text-slate-600 animate-pulse" />
-        <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest [writing-mode:vertical-lr] rotate-180">
-          ALERTS FEED
+      <div className="flex-1 flex flex-col justify-center items-center mt-4">
+        <span className="text-[10px] text-[#255325] uppercase tracking-widest [writing-mode:vertical-lr] rotate-180">
+          ALERTS_FEED
         </span>
       </div>
-    </div>
+    </aside>
   );
 };
 

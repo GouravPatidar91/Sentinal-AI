@@ -40,55 +40,21 @@ You MUST respond with a valid JSON object ONLY. Do NOT include markdown code blo
 Analyze the incident meticulously. Provide realistic, concrete, and highly technical recommendations.
 """
 
-class AIInvestigator:
-    @staticmethod
-    def _build_timeline_str(events: List[IncidentEvent]) -> str:
-        lines = []
-        for ev in events:
-            rule_name = ev.rule.name if ev.rule else "Anomaly Heuristics"
-            tactic = ev.rule.tactic if ev.rule else "Discovery"
-            tech = ev.rule.technique if ev.rule else "T1046"
-            lines.append(
-                f"- [{ev.timestamp}] (Rule: {rule_name} | MITRE: {tech} {tactic}) - Msg: {ev.description}\n"
-                f"  Raw Log: {ev.log_entry.raw_log[:250]}"
-            )
-        return "\n".join(lines)
+from backend.app.services.ai_agents import multi_agent_workflow
 
+class AIInvestigator:
     async def investigate(self, incident: Incident) -> str:
         """
-        Gathers incident data, triggers the configured AI provider, and returns the markdown/JSON report.
+        Runs Multi-Agent SOC Workflow (Triage Agent -> Forensic Agent -> Containment Agent).
+        Returns a formatted JSON report string.
         """
-        timeline_str = self._build_timeline_str(incident.events)
-        
-        prompt = PROMPT_TEMPLATE.format(
-            title=incident.title,
-            description=incident.description,
-            severity=incident.severity,
-            risk_score=incident.risk_score,
-            anomaly_score=incident.anomaly_score,
-            timeline_str=timeline_str
-        )
-        
-        provider = settings.AI_PROVIDER.lower()
-        
         try:
-            if provider in ["openrouter", "open_router"]:
-                return await self._query_openrouter(prompt)
-            elif provider == "gemini":
-                return await self._query_gemini(prompt)
-            elif provider == "openai":
-                return await self._query_openai(prompt)
-            elif provider == "ollama":
-                return await self._query_ollama(prompt)
-            else:
-                # Default to openrouter if key is present
-                if settings.OPENROUTER_API_KEY or os.getenv("OPENROUTER_API_KEY"):
-                    return await self._query_openrouter(prompt)
-                return self._generate_mock_investigation(incident)
+            report_dict = await multi_agent_workflow.run_workflow(incident)
+            return json.dumps(report_dict, indent=2)
         except Exception as e:
-            print(f"AI investigation request failed via {provider}: {e}")
-            # Graceful fallback to mock report to avoid breaking the application
-            return self._generate_mock_investigation(incident, error=str(e))
+            print(f"Multi-Agent investigation workflow error: {e}")
+            fallback_dict = multi_agent_workflow._get_fallback_data("containment", incident)
+            return json.dumps(fallback_dict, indent=2)
 
     async def _query_openrouter(self, prompt: str) -> str:
         """Queries OpenRouter API (OpenAI-compatible) using high-performance free models."""

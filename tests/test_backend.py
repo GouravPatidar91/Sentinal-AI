@@ -155,3 +155,53 @@ def test_anomaly_scoring_heuristics(db_session):
     # Score the second log
     score = anomaly_detector.predict_anomaly(db_session, log2)
     assert score >= 0.5  # Should flag as anomaly due to impossible travel
+
+def test_multi_agent_workflow(db_session):
+    """Verify Multi-Agent SOC Workflow produces Triage, Forensic, and Containment reports."""
+    import asyncio
+    from backend.app.services.ai_agents import multi_agent_workflow
+    
+    incident = Incident(
+        title="Test Critical Security Threat",
+        description="Multiple failed SSH attempts followed by root login.",
+        severity="CRITICAL",
+        risk_score=90,
+        anomaly_score=0.85
+    )
+    db_session.add(incident)
+    db_session.commit()
+    
+    report = asyncio.run(multi_agent_workflow.run_workflow(incident))
+    assert "executive_summary" in report
+    assert "technical_analysis" in report
+    assert "soar_actions" in report
+    assert len(report["soar_actions"]) > 0
+
+def test_soar_action_model(db_session):
+    """Verify SOARAction DB model creation and relationship."""
+    from backend.app.models.models import SOARAction
+    
+    incident = Incident(
+        title="Ransomware Activity",
+        description="Process crypto-locker detected.",
+        severity="CRITICAL",
+        risk_score=95
+    )
+    db_session.add(incident)
+    db_session.commit()
+    
+    action = SOARAction(
+        incident_id=incident.id,
+        action_type="KILL_PROCESS",
+        target_host="win-server01",
+        payload="4082",
+        description="Kill ransomware PID 4082",
+        status="PENDING"
+    )
+    db_session.add(action)
+    db_session.commit()
+    
+    assert action.id is not None
+    assert action.status == "PENDING"
+    assert action.incident.title == "Ransomware Activity"
+

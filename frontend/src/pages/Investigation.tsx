@@ -1,20 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { 
-  ArrowLeft, 
-  Shield, 
-  FileText, 
-  Download, 
-  Play, 
-  Cpu, 
-  Calendar, 
-  Server, 
-  Network,
-  Clock
-} from "lucide-react";
 import { useNotifications } from "../context/NotificationContext";
 import { useAuth } from "../context/AuthContext";
 import { API_BASE, WS_BASE } from "../config/api";
+import { formatDateTime } from "../utils/time";
 
 interface Rule {
   name: string;
@@ -48,6 +37,19 @@ interface IncidentEvent {
   log_entry: LogEntry;
 }
 
+interface SOARAction {
+  id: number;
+  action_type: string;
+  target_host: string;
+  payload: string;
+  description: string;
+  status: string;
+  executed_by_id: number | null;
+  output: string | null;
+  created_at: string;
+  executed_at: string | null;
+}
+
 interface IncidentDetail {
   id: number;
   title: string;
@@ -61,6 +63,7 @@ interface IncidentDetail {
   assigned_to_id: number | null;
   ai_report: string | null;
   events: IncidentEvent[];
+  soar_actions?: SOARAction[];
 }
 
 export const Investigation: React.FC = () => {
@@ -73,6 +76,7 @@ export const Investigation: React.FC = () => {
   const [aiStep, setAiStep] = useState(0);
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
   const [analysts, setAnalysts] = useState<any[]>([]);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const aiLoadingSteps = [
     "Compiling incident threat vectors...",
@@ -95,7 +99,6 @@ export const Investigation: React.FC = () => {
           (data.type === "NEW_LOG" && data.incident && data.incident.id === currentIncidentId) ||
           (data.type === "INCIDENT_UPDATE" && data.incident && data.incident.id === currentIncidentId)
         ) {
-          // Re-fetch details to dynamically load new timeline items/metrics
           fetchIncidentDetail();
         }
       } catch (err) {
@@ -106,13 +109,14 @@ export const Investigation: React.FC = () => {
     return () => {
       ws.close();
     };
-  }, [id]);
+  }, [id, token]);
 
   const fetchIncidentDetail = async () => {
     setLoading(true);
+    const activeToken = token || localStorage.getItem("token");
     try {
       const resp = await fetch(`${API_BASE}/api/incidents/${id}`, {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: { "Authorization": `Bearer ${activeToken}` }
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -126,7 +130,6 @@ export const Investigation: React.FC = () => {
   };
 
   const fetchAnalysts = async () => {
-    // Simulated simple analyst list for assignment
     setAnalysts([
       { id: 1, username: "admin", role: "admin" },
       { id: 2, username: "analyst", role: "analyst" }
@@ -182,12 +185,35 @@ export const Investigation: React.FC = () => {
     }
   };
 
+  const handleExportPdf = async () => {
+    if (!incident || isExportingPdf) return;
+    try {
+      setIsExportingPdf(true);
+      const resp = await fetch(`${API_BASE}/api/incidents/${incident.id}/pdf`);
+      if (!resp.ok) throw new Error("Failed to export PDF");
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `incident_INC_${incident.id}_report.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      fetchIncidentDetail();
+    } catch (e) {
+      console.error("PDF export error:", e);
+      window.open(`${API_BASE}/api/incidents/${incident.id}/pdf`, "_blank");
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   const triggerAIInvestigation = async () => {
     if (!incident) return;
     setAiLoading(true);
     setAiStep(0);
     
-    // Cycle through loading steps text for dramatic cognitive effect
     const interval = setInterval(() => {
       setAiStep(prev => (prev < aiLoadingSteps.length - 1 ? prev + 1 : prev));
     }, 1500);
@@ -214,37 +240,82 @@ export const Investigation: React.FC = () => {
     }
   };
 
-  const executeContainmentAction = (actionName: string) => {
-    triggerNotification(
-      "Containment Action Triggered",
-      `Successfully executed: ${actionName}`,
-      "HIGH"
-    );
+  const handleApproveSoarAction = async (actionId: number) => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/soar/approve/${actionId}`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (resp.ok) {
+        triggerNotification("SOAR Action Approved", `Remediation command #${actionId} dispatched to target endpoint.`, "HIGH");
+        fetchIncidentDetail();
+      }
+    } catch (err) {
+      console.error("Error approving SOAR action:", err);
+    }
   };
 
-  const getSeverityColor = (sev: string) => {
+  const handleCreateAndApproveSoarAction = async (actionType: string, payload: string, description: string) => {
+    if (!incident) return;
+    const targetHost = incident.events?.find(ev => ev.log_entry?.host && ev.log_entry.host !== "unknown-host")?.log_entry?.host || "Unknown Host";
+    try {
+      const createResp = await fetch(`${API_BASE}/api/soar/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          incident_id: Number(id),
+          action_type: actionType,
+          target_host: targetHost,
+          payload: payload,
+          description: description
+        })
+      });
+      if (createResp.ok) {
+        const actionData = await createResp.json();
+        await handleApproveSoarAction(actionData.id);
+      }
+    } catch (err) {
+      console.error("Error creating SOAR action:", err);
+    }
+  };
+
+  const renderAsciiMeter = (val: number, max: number, chars = 8) => {
+    const filled = Math.min(chars, Math.max(0, Math.round((val / max) * chars)));
+    return "█".repeat(filled) + "░".repeat(chars - filled);
+  };
+
+  const getSeverityBadge = (sev: string) => {
     switch (sev?.toUpperCase()) {
-      case "CRITICAL": return "text-red-500 border-red-500/30 bg-red-500/10";
-      case "HIGH": return "text-orange-500 border-orange-500/30 bg-orange-500/10";
-      case "WARNING": return "text-yellow-500 border-yellow-500/30 bg-yellow-500/10";
-      default: return "text-blue-500 border-blue-500/30 bg-blue-500/10";
+      case "CRITICAL":
+        return <span className="bg-[#66ff66] text-[#000000] font-bold px-1.5 py-0.5 select-none">[CRITICAL]</span>;
+      case "HIGH":
+        return <span className="text-[#ffffff] border border-[#66ff66] px-1.5 py-0.5 select-none">[HIGH]</span>;
+      case "WARNING":
+        return <span className="text-[#66ff66] border border-[#255325] px-1.5 py-0.5 select-none">[WARNING]</span>;
+      default:
+        return <span className="text-[#58ca58] border border-[#255325] px-1.5 py-0.5 select-none">[INFO]</span>;
     }
   };
 
   if (loading) {
-    return <div className="flex-1 p-8 text-center text-slate-400 font-medium">Gathering threat timeline data...</div>;
-  }
-
-  if (!incident) {
     return (
-      <div className="flex-1 p-8 text-center space-y-4">
-        <h3 className="text-xl text-slate-300 font-bold">Incident Not Found</h3>
-        <Link to="/incidents" className="text-blue-400 hover:underline">Return to queue</Link>
+      <div className="flex-1 p-8 text-center text-[#58ca58] font-mono text-[13px] bg-[#000000]">
+        &gt; Retrieving incident ledger and correlated event chain...
       </div>
     );
   }
 
-  // Parse AI report if available
+  if (!incident) {
+    return (
+      <div className="flex-1 p-8 text-center space-y-4 font-mono bg-[#000000] text-[#66ff66]">
+        <h3 className="text-[18px] text-[#ffffff] font-medium">[ ✕ ] INCIDENT_NOT_FOUND</h3>
+        <Link to="/incidents" className="text-[#58ca58] hover:text-[#66ff66] underline">
+          [ ← RETURN_TO_INCIDENT_QUEUE ]
+        </Link>
+      </div>
+    );
+  }
+
   let aiReportData: any = null;
   if (incident.ai_report) {
     try {
@@ -254,177 +325,179 @@ export const Investigation: React.FC = () => {
     }
   }
 
-  // Extracted attacker IP & target details for visualization
   const attackerIp = incident.events?.find(ev => ev.log_entry?.src_ip && ev.log_entry.src_ip !== "-")?.log_entry?.src_ip || "Unknown IP";
   const targetHost = incident.events?.find(ev => ev.log_entry?.host && ev.log_entry.host !== "unknown-host")?.log_entry?.host || "Unknown Host";
   const targetIp = incident.events?.find(ev => ev.log_entry?.dst_ip && ev.log_entry.dst_ip !== "-")?.log_entry?.dst_ip;
   const entryVector = incident.events?.find(ev => ev.rule?.tactic)?.rule?.tactic || "Initial Access";
 
   return (
-    <div className="flex-1 p-8 space-y-8 overflow-y-auto h-screen max-w-[calc(100vw-16rem)]">
+    <div className="flex-1 min-w-0 p-6 space-y-6 overflow-y-auto h-screen bg-[#000000] text-[#66ff66] font-mono select-text">
       
-      {/* Header Link */}
-      <div className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors">
-        <ArrowLeft className="w-4 h-4" />
-        <Link to="/incidents" className="font-semibold uppercase tracking-wider">Back to Incident Queue</Link>
+      {/* Return Link & Session Header */}
+      <div className="flex items-center justify-between text-[12px] border-b border-[#255325] pb-2">
+        <Link 
+          to="/incidents" 
+          className="text-[#58ca58] hover:text-[#000000] hover:bg-[#66ff66] px-2 py-0.5 border border-[#255325] transition-colors select-none"
+        >
+          [ ← RETURN_TO_INCIDENTS_QUEUE ]
+        </Link>
+        <span className="text-[#255325]">
+          INCIDENT_SESSION: INC-{incident.id} // ACTIVE_CASE
+        </span>
       </div>
 
-      {/* Incident Header Deck */}
-      <div className="glass-card rounded-xl p-6 border flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      {/* Main Incident Dossier Card */}
+      <div className="border border-[#255325] p-5 bg-[#000000] flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-sm text-slate-500 font-semibold">INCIDENT INC-{incident.id}</span>
-            <span className={`px-2.5 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${getSeverityColor(incident.severity)}`}>
-              {incident.severity}
+          <div className="flex items-center gap-3 text-[12px]">
+            <span className="text-[#ffffff] font-medium">INCIDENT #{incident.id}</span>
+            {getSeverityBadge(incident.severity)}
+            <span className="text-[#58ca58]">
+              RISK: <strong className="text-[#66ff66]">[{renderAsciiMeter(incident.risk_score, 100, 8)}] {incident.risk_score}/100</strong>
             </span>
           </div>
-          <h2 className="text-2xl font-bold text-slate-100">{incident.title}</h2>
-          <div className="flex flex-wrap gap-4 text-xs text-slate-400 font-medium">
-            <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-slate-500" /> {new Date(incident.created_at).toLocaleString()}</span>
-            <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-slate-500" /> Risk Score: <strong className="text-slate-200">{incident.risk_score}/100</strong></span>
-            <span className="flex items-center gap-1.5"><Network className="w-3.5 h-3.5 text-slate-500" /> Attacker: <strong className="text-slate-200">{attackerIp}</strong></span>
-            <span className="flex items-center gap-1.5"><Server className="w-3.5 h-3.5 text-slate-500" /> Target Asset: <strong className="text-slate-200">{targetHost.toUpperCase()}{targetIp ? ` (${targetIp})` : ""}</strong></span>
+
+          <h1 className="text-[20px] sm:text-[24px] font-medium text-[#ffffff] tracking-tight uppercase">
+            {incident.title}
+          </h1>
+
+          <div className="flex flex-wrap gap-4 text-[12px] text-[#58ca58]">
+            <span>TIMESTAMP: <strong className="text-[#ffffff]">{formatDateTime(incident.created_at)}</strong></span>
+            <span>ATTACKER_IP: <strong className="text-[#ffffff]">{attackerIp}</strong></span>
+            <span>TARGET_HOST: <strong className="text-[#ffffff]">{targetHost.toUpperCase()}{targetIp ? ` (${targetIp})` : ""}</strong></span>
           </div>
         </div>
 
-        {/* Triage controls */}
-        <div className="flex flex-wrap gap-4 items-center">
-          
-          {/* Assignee Selection */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Assignee</span>
+        {/* Triage Status & Controls */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col gap-1 text-[11px]">
+            <span className="text-[#255325] uppercase">ASSIGNEE:</span>
             <select
               value={incident.assigned_to_id || ""}
               onChange={(e) => handleAssigneeChange(e.target.value)}
-              className="bg-slate-950 border border-darkBorder rounded px-3 py-1.5 text-xs text-slate-300 outline-none cursor-pointer"
+              className="bg-[#000000] border border-[#255325] text-[#66ff66] px-2 py-1 text-[11px] outline-none cursor-pointer hover:border-[#66ff66] transition-colors"
             >
-              <option value="">Unassigned</option>
+              <option value="">[UNASSIGNED]</option>
               {analysts.map(a => (
-                <option key={a.id} value={a.id}>{a.username}</option>
+                <option key={a.id} value={a.id}>[{a.username.toUpperCase()}]</option>
               ))}
             </select>
           </div>
 
-          {/* Status Selection */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Status</span>
+          <div className="flex flex-col gap-1 text-[11px]">
+            <span className="text-[#255325] uppercase">STATUS:</span>
             <select
               value={incident.status}
               onChange={(e) => handleStatusChange(e.target.value)}
-              className="bg-slate-950 border border-darkBorder rounded px-3 py-1.5 text-xs text-slate-300 outline-none cursor-pointer"
+              className="bg-[#000000] border border-[#255325] text-[#66ff66] px-2 py-1 text-[11px] outline-none cursor-pointer hover:border-[#66ff66] transition-colors"
             >
-              <option value="New">New</option>
-              <option value="Investigating">Investigating</option>
-              <option value="Contained">Contained</option>
-              <option value="Resolved">Resolved</option>
-              <option value="Closed">Closed</option>
+              <option value="New">[NEW]</option>
+              <option value="Investigating">[INVESTIGATING]</option>
+              <option value="Contained">[CONTAINED]</option>
+              <option value="Resolved">[RESOLVED]</option>
+              <option value="Closed">[CLOSED]</option>
             </select>
           </div>
 
-          {/* PDF Report Download */}
-          <a
-            href={`${API_BASE}/api/incidents/${incident.id}/pdf`}
-            className="flex items-center gap-2 bg-slate-900 border border-darkBorder hover:bg-slate-800 text-slate-300 px-4 py-2 rounded-lg text-xs font-semibold mt-4 transition-colors"
+          <button
+            onClick={handleExportPdf}
+            disabled={isExportingPdf}
+            className={`mt-4 px-3 py-1.5 border text-[11px] font-medium transition-colors select-none cursor-pointer ${
+              isExportingPdf
+                ? "border-[#66ff66] bg-[#66ff66] text-[#000000] animate-pulse"
+                : "border-[#255325] text-[#58ca58] hover:text-[#000000] hover:bg-[#66ff66] hover:border-[#66ff66]"
+            }`}
           >
-            <Download className="w-4 h-4" />
-            Export PDF
-          </a>
-
+            {isExportingPdf ? "[ ⚡ GENERATING AI REPORT & PDF... ]" : "[ ⇩ EXPORT_PDF ↵ ]"}
+          </button>
         </div>
       </div>
 
-      {/* Interactive Attack Chain Grid */}
-      <div className="glass-card rounded-xl p-6 border flex flex-col">
-        <h3 className="font-bold text-base text-slate-100 flex items-center gap-2 mb-6">
-          <Shield className="w-4 h-4 text-emerald-400" />
-          Interactive Attack Chain Flow
-        </h3>
-        
-        <div className="flex flex-col md:flex-row items-center justify-around gap-6 py-4 relative">
-          
-          {/* Node 1: Attacker IP */}
-          <div className="flex flex-col items-center p-4 rounded-xl border border-red-500/20 bg-red-950/10 w-44 text-center">
-            <Network className="w-7 h-7 text-red-500 mb-2" />
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Threat Origin</span>
-            <span className="font-mono text-xs font-bold text-slate-200 mt-1">{attackerIp}</span>
-          </div>
+      {/* Interactive Attack Chain Flow Box */}
+      <div>
+        <div className="text-[12px] text-[#255325] mb-2 select-none">
+          [01] $ sentinel --trace-flow --incident INC-{incident.id}
+        </div>
 
-          <div className="text-slate-700 text-xl font-bold hidden md:block">→</div>
-
-          {/* Node 2: Entry Vector Tactic */}
-          <div className="flex flex-col items-center p-4 rounded-xl border border-yellow-500/20 bg-yellow-950/10 w-44 text-center">
-            <FileText className="w-7 h-7 text-yellow-500 mb-2" />
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Attack Vector</span>
-            <span className="font-mono text-xs font-bold text-slate-200 mt-1">{entryVector}</span>
-          </div>
-
-          <div className="text-slate-700 text-xl font-bold hidden md:block">→</div>
-
-          {/* Node 3: Target Host compromise */}
-          <div className="flex flex-col items-center p-4 rounded-xl border border-blue-500/20 bg-blue-950/10 w-44 text-center">
-            <Server className="w-7 h-7 text-blue-500 mb-2" />
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target Asset</span>
-            <span className="font-mono text-xs font-bold text-slate-200 mt-1">
-              {targetHost.toUpperCase()}
-              {targetIp ? ` (${targetIp})` : ""}
+        <div className="border border-[#255325] p-4 bg-[#000000]">
+          <div className="border-b border-[#255325] pb-2 mb-3 text-[12px] flex justify-between items-center">
+            <span className="text-[#ffffff] font-medium">
+              ATTACK_CHAIN_CORRELATION // END-TO-END RECONSTRUCTION
+            </span>
+            <span className="text-[#58ca58] text-[11px]">
+              TTP_VECTOR: {entryVector.toUpperCase()}
             </span>
           </div>
-          
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-[12px]">
+            <div className="border border-[#255325] p-3 bg-[#000000]">
+              <div className="text-[#255325] text-[10px] uppercase">STAGE 01: THREAT_ORIGIN</div>
+              <div className="text-[#ffffff] font-bold text-[14px] mt-1">{attackerIp}</div>
+              <div className="text-[#58ca58] text-[10px] mt-1">External Ingress Node</div>
+            </div>
+
+            <div className="border border-[#255325] p-3 bg-[#000000]">
+              <div className="text-[#255325] text-[10px] uppercase">STAGE 02: MITRE_TACTIC</div>
+              <div className="text-[#66ff66] font-bold text-[14px] mt-1">{entryVector}</div>
+              <div className="text-[#58ca58] text-[10px] mt-1">Rule Signature Match</div>
+            </div>
+
+            <div className="border border-[#255325] p-3 bg-[#000000]">
+              <div className="text-[#255325] text-[10px] uppercase">STAGE 03: TARGET_ASSET</div>
+              <div className="text-[#ffffff] font-bold text-[14px] mt-1">
+                {targetHost.toUpperCase()}{targetIp ? ` (${targetIp})` : ""}
+              </div>
+              <div className="text-[#58ca58] text-[10px] mt-1">Internal Endpoint Monitored</div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Main Analysis Column & Logs timeline split */}
+      {/* Two-Column Detail Grid: Timeline & Multi-Agent AI SOAR */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Left Column: Attack Timeline Events */}
-        <div className="glass-card rounded-xl p-6 border lg:col-span-1 flex flex-col h-[600px]">
-          <h3 className="font-bold text-base text-slate-100 flex items-center gap-2 mb-6">
-            <Clock className="w-4 h-4 text-blue-400" />
-            Evidence & Event Timeline
-          </h3>
-          <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-            {(incident.events || []).map((ev) => {
+        {/* Evidence & Event Timeline (1 Col) */}
+        <div className="border border-[#255325] p-4 bg-[#000000] lg:col-span-1 flex flex-col h-[650px]">
+          <div className="flex justify-between items-center border-b border-[#255325] pb-2 mb-3 text-[12px]">
+            <span className="text-[#ffffff] font-medium">
+              EVIDENCE_TIMELINE // CHRONOLOGICAL
+            </span>
+            <span className="text-[#58ca58] text-[11px]">
+              EVENTS: {incident.events?.length || 0}
+            </span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-[11px]">
+            {(incident.events || []).map((ev, index) => {
               const expanded = expandedLogId === ev.id;
+              const stepNo = (index + 1).toString().padStart(2, "0");
               return (
-                <div key={ev.id} className="border-l-2 border-slate-700 pl-4 py-1 relative">
-                  {/* Timeline point */}
-                  <span className="absolute -left-[6px] top-2.5 w-2.5 h-2.5 rounded-full bg-blue-500 border border-darkBg" />
-                  
-                  <div className="flex justify-between items-start">
-                    <span className="text-[10px] font-mono text-slate-500">{new Date(ev.timestamp).toLocaleTimeString()}</span>
+                <div key={ev.id} className="border border-[#255325] p-2.5 bg-[#000000] space-y-1.5">
+                  <div className="flex justify-between items-center text-[10px] text-[#255325]">
+                    <span>[{stepNo}] {formatDateTime(ev.timestamp)}</span>
                     {ev.rule && (
-                      <span className="bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">
-                        {ev.rule.name}
+                      <span className="text-[#66ff66] font-bold">
+                        [{ev.rule.name}]
                       </span>
                     )}
                   </div>
-                  <h4 className="text-xs font-semibold text-slate-200 mt-1">{ev.description}</h4>
-                  
-                  {/* Toggle Log expand */}
+                  <div className="text-[#ffffff] font-medium">
+                    {ev.description}
+                  </div>
                   <button 
                     onClick={() => setExpandedLogId(expanded ? null : ev.id)}
-                    className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold mt-2 block"
+                    className="text-[10px] text-[#58ca58] hover:text-[#66ff66] cursor-pointer"
                   >
-                    {expanded ? "Collapse Raw Log ▲" : "View Raw Event ▼"}
+                    {expanded ? "[- HIDE_RAW_PAYLOAD]" : "[+ VIEW_RAW_PAYLOAD]"}
                   </button>
-                  
-                  {expanded && (
-                    <div className="mt-3 bg-slate-950 border border-darkBorder rounded p-2.5 font-mono text-[10px] text-slate-400 space-y-2 max-w-full overflow-x-auto">
-                      <div>
-                        <span className="text-slate-600 block mb-0.5">// Parsed Fields:</span>
-                        <div className="grid grid-cols-2 gap-1 bg-slate-900/60 p-2 rounded">
-                          <div><span className="text-slate-500">Host:</span> {ev.log_entry.host}</div>
-                          <div><span className="text-slate-500">Source:</span> {ev.log_entry.source}</div>
-                          <div><span className="text-slate-500">IP:</span> {ev.log_entry.src_ip || "-"}</div>
-                          <div><span className="text-slate-500">User:</span> {ev.log_entry.username || "-"}</div>
-                          <div><span className="text-slate-500">Process:</span> {ev.log_entry.process || "-"}</div>
-                          <div><span className="text-slate-500">Severity:</span> {ev.log_entry.severity}</div>
-                        </div>
-                      </div>
-                      <div>
-                        <span className="text-slate-600 block mb-0.5">// Raw Message:</span>
-                        <div className="whitespace-pre-wrap select-all bg-slate-900/40 p-2 rounded max-h-40 overflow-y-auto">{ev.log_entry.raw_log}</div>
-                      </div>
+                  {expanded && ev.log_entry && (
+                    <div className="mt-2 p-2 bg-[#255325]/10 border border-[#255325] font-mono text-[10px] text-[#58ca58] space-y-1">
+                      <div>SOURCE: <span className="text-[#ffffff]">{ev.log_entry.source}</span></div>
+                      <div>HOST: <span className="text-[#ffffff]">{ev.log_entry.host}</span></div>
+                      {ev.log_entry.src_ip && <div>IP: <span className="text-[#ffffff]">{ev.log_entry.src_ip}</span></div>}
+                      <pre className="pt-1 text-[#66ff66] border-t border-[#255325] whitespace-pre-wrap select-all">
+                        {ev.log_entry.raw_log}
+                      </pre>
                     </div>
                   )}
                 </div>
@@ -433,125 +506,187 @@ export const Investigation: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Column: AI Insights & Remediation Actions */}
-        <div className="glass-card rounded-xl p-6 border lg:col-span-2 flex flex-col h-[600px] overflow-y-auto">
-          
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
-              SentinelAI Investigation Report
-            </h3>
+        {/* Multi-Agent AI & SOAR Closed-Loop Remediation (2 Cols) */}
+        <div className="border border-[#255325] p-4 bg-[#000000] lg:col-span-2 flex flex-col h-[650px] overflow-y-auto">
+          <div className="flex justify-between items-center border-b border-[#255325] pb-2 mb-4 text-[12px]">
+            <span className="text-[#ffffff] font-medium">
+              MULTI-AGENT AI SOC // CLOSED-LOOP SOAR CONTAINMENT
+            </span>
             
             {!incident.ai_report && !aiLoading && (
               <button 
                 onClick={triggerAIInvestigation}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1.5 rounded text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/10 cursor-pointer transition-colors"
+                className="px-3 py-1 bg-[#66ff66] text-[#000000] hover:bg-[#ffffff] font-medium text-[11px] transition-colors cursor-pointer select-none"
               >
-                <Play className="w-3 h-3 fill-current" />
-                Initialize AI Investigation
+                [ ⚡ INITIALIZE_MULTI_AGENT_SOC ↵ ]
               </button>
             )}
           </div>
 
-          {/* AI Loader screen */}
           {aiLoading && (
-            <div className="flex-1 flex flex-col items-center justify-center space-y-4">
-              <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
-              <div className="text-center">
-                <span className="text-sm font-semibold text-slate-300 block">Investigating Incident INC-{incident.id}</span>
-                <span className="text-xs text-slate-500 italic mt-1 block">{aiLoadingSteps[aiStep]}</span>
-              </div>
+            <div className="flex-1 flex flex-col items-center justify-center space-y-3">
+              <span className="text-[#66ff66] text-[13px] animate-pulse">
+                [ AI_AGENT_BUS: ORCHESTRATING (TRIAGE ➔ FORENSICS ➔ CONTAINMENT) ]
+              </span>
+              <span className="text-[11px] text-[#58ca58]">
+                &gt; {aiLoadingSteps[aiStep]}
+              </span>
             </div>
           )}
 
-          {/* Report Viewer */}
           {!aiLoading && (
-            <div className="flex-1 flex flex-col space-y-6">
+            <div className="flex-1 flex flex-col space-y-4">
               {aiReportData ? (
-                <div className="space-y-6 text-sm">
+                <div className="space-y-4 text-[12px]">
                   
-                  {/* Executive Summary Banner */}
-                  <div className="p-4 rounded-xl border border-indigo-500/20 bg-indigo-950/15">
-                    <span className="text-[10px] font-bold text-indigo-400 tracking-widest uppercase block mb-1">Executive Summary</span>
-                    <p className="text-slate-300 leading-relaxed font-medium">{aiReportData.executive_summary}</p>
+                  {/* Executive Summary */}
+                  <div className="border border-[#255325] p-3 bg-[#255325]/10">
+                    <span className="text-[10px] text-[#255325] uppercase tracking-wider block mb-1">
+                      // TRIAGE AGENT EXECUTIVE SUMMARY:
+                    </span>
+                    <p className="text-[#ffffff] leading-relaxed">
+                      {aiReportData.executive_summary}
+                    </p>
                   </div>
                   
-                  {/* Analysis Breakdown */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-4 rounded-lg bg-slate-900/60 border border-darkBorder">
-                      <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase block mb-2">Technical Analysis</span>
-                      <p className="text-slate-400 text-xs leading-relaxed">{aiReportData.technical_analysis}</p>
+                  {/* Forensic & Root Cause Analysis */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="border border-[#255325] p-3 bg-[#000000]">
+                      <span className="text-[10px] text-[#255325] uppercase tracking-wider block mb-1">
+                        // FORENSIC AGENT ANALYSIS:
+                      </span>
+                      <p className="text-[#58ca58] leading-relaxed">
+                        {aiReportData.technical_analysis}
+                      </p>
                     </div>
-                    <div className="p-4 rounded-lg bg-slate-900/60 border border-darkBorder">
-                      <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase block mb-2">Root Cause</span>
-                      <p className="text-slate-400 text-xs leading-relaxed">{aiReportData.root_cause}</p>
+                    <div className="border border-[#255325] p-3 bg-[#000000]">
+                      <span className="text-[10px] text-[#255325] uppercase tracking-wider block mb-1">
+                        // ROOT CAUSE VECTOR:
+                      </span>
+                      <p className="text-[#58ca58] leading-relaxed">
+                        {aiReportData.root_cause}
+                      </p>
                     </div>
                   </div>
 
-                  {/* Remediation Cards */}
-                  <div className="border border-darkBorder rounded-xl overflow-hidden">
-                    <div className="bg-slate-900/80 px-4 py-3 border-b border-darkBorder font-bold text-xs uppercase tracking-wider text-slate-300">
-                      Response & Containment Playbook
+                  {/* SOAR Remediation Protocol Actions */}
+                  <div className="border border-[#66ff66] p-4 bg-[#255325]/15 space-y-3">
+                    <div className="flex justify-between items-center border-b border-[#255325] pb-2 text-[11px]">
+                      <span className="text-[#ffffff] font-medium">
+                        [ ⚡ ] SOAR CLOSED-LOOP REMEDIATION COMMANDS
+                      </span>
+                      <span className="text-[#58ca58]">TARGET: {targetHost}</span>
                     </div>
-                    <div className="p-4 space-y-4">
-                      
-                      <div>
-                        <span className="text-[10px] font-bold text-red-400 uppercase block mb-1">Immediate Containment</span>
-                        <p className="text-slate-300 text-xs">{aiReportData.containment_steps}</p>
-                        <button 
-                          onClick={() => executeContainmentAction(aiReportData.containment_steps)}
-                          className="mt-2 text-[10px] bg-red-950/40 text-red-400 border border-red-900/50 hover:bg-red-900/20 px-2.5 py-1 rounded font-bold cursor-pointer transition-all"
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="border border-[#255325] p-3 bg-[#000000] flex flex-col justify-between space-y-2">
+                        <div>
+                          <div className="text-[10px] text-[#255325] uppercase">KILL_PROCESS</div>
+                          <div className="text-[#ffffff] font-medium text-[11px]">PID: 4082 (cmd.exe)</div>
+                        </div>
+                        <button
+                          onClick={() => handleCreateAndApproveSoarAction("KILL_PROCESS", "4082", "Terminate suspicious process ID 4082")}
+                          className="w-full py-1.5 px-2 bg-[#66ff66] text-[#000000] hover:bg-[#ffffff] font-medium text-[10px] transition-colors cursor-pointer"
                         >
-                          Execute Containment Protocol
+                          [ ↵ DISPATCH KILL_PID ]
                         </button>
                       </div>
-                      
-                      <div className="border-t border-darkBorder pt-3">
-                        <span className="text-[10px] font-bold text-yellow-400 uppercase block mb-1">Recovery Phase</span>
-                        <p className="text-slate-300 text-xs">{aiReportData.recovery_steps}</p>
+
+                      <div className="border border-[#255325] p-3 bg-[#000000] flex flex-col justify-between space-y-2">
+                        <div>
+                          <div className="text-[10px] text-[#255325] uppercase">BLOCK_FIREWALL_IP</div>
+                          <div className="text-[#ffffff] font-medium text-[11px] truncate">IP: {attackerIp}</div>
+                        </div>
+                        <button
+                          onClick={() => handleCreateAndApproveSoarAction("BLOCK_IP", attackerIp, `Block external attacker IP ${attackerIp} on host firewall`)}
+                          className="w-full py-1.5 px-2 bg-[#66ff66] text-[#000000] hover:bg-[#ffffff] font-medium text-[10px] transition-colors cursor-pointer"
+                        >
+                          [ ↵ DISPATCH BLOCK_IP ]
+                        </button>
                       </div>
 
-                      <div className="border-t border-darkBorder pt-3">
-                        <span className="text-[10px] font-bold text-emerald-400 uppercase block mb-1">SOC Best Practices</span>
-                        <p className="text-slate-300 text-xs">{aiReportData.soc_recommendations}</p>
+                      <div className="border border-[#255325] p-3 bg-[#000000] flex flex-col justify-between space-y-2">
+                        <div>
+                          <div className="text-[10px] text-[#255325] uppercase">QUARANTINE_INTERFACE</div>
+                          <div className="text-[#ffffff] font-medium text-[11px] truncate">Host: {targetHost}</div>
+                        </div>
+                        <button
+                          onClick={() => handleCreateAndApproveSoarAction("QUARANTINE_INTERFACE", "Ethernet0", `Isolate network interface on ${targetHost}`)}
+                          className="w-full py-1.5 px-2 bg-[#66ff66] text-[#000000] hover:bg-[#ffffff] font-medium text-[10px] transition-colors cursor-pointer"
+                        >
+                          [ ↵ DISPATCH ISOLATE ]
+                        </button>
                       </div>
+                    </div>
 
+                    {/* SOAR Action Execution History */}
+                    {incident.soar_actions && incident.soar_actions.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-[#255325] space-y-2">
+                        <span className="text-[10px] text-[#255325] uppercase block">
+                          // SOAR ACTION EXECUTION LEDGER:
+                        </span>
+                        <div className="space-y-1">
+                          {incident.soar_actions.map((act: SOARAction) => (
+                            <div key={act.id} className="p-2 border border-[#255325] bg-[#000000] flex justify-between items-center text-[11px]">
+                              <div>
+                                <span className="text-[#ffffff]">#{act.id} {act.action_type}</span> ({act.payload}) - {act.description}
+                              </div>
+                              <span className={`px-1.5 py-0.5 text-[10px] font-bold ${
+                                act.status === "EXECUTED" ? "bg-[#66ff66] text-[#000000]" :
+                                act.status === "APPROVED" ? "border border-[#66ff66] text-[#66ff66]" :
+                                act.status === "FAILED" ? "border border-[#255325] text-[#ffffff]" :
+                                "text-[#58ca58]"
+                              }`}>
+                                [{act.status}]
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="border-t border-[#255325] pt-2 space-y-2 text-[11px]">
+                      <div>
+                        <span className="text-[10px] text-[#255325] uppercase block">RECOVERY_PROTOCOL:</span>
+                        <p className="text-[#58ca58] mt-0.5">{aiReportData.recovery_steps}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-[#255325] uppercase block">SOC_HARDENING_RECOMMENDATIONS:</span>
+                        <p className="text-[#58ca58] mt-0.5">{aiReportData.soc_recommendations}</p>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Re-investigate button */}
                   <button 
                     onClick={triggerAIInvestigation}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold border border-indigo-900/30 hover:border-indigo-800 bg-slate-950/40 px-3 py-1.5 rounded w-max cursor-pointer"
+                    className="text-[11px] text-[#58ca58] hover:text-[#66ff66] border border-[#255325] hover:border-[#66ff66] px-3 py-1 cursor-pointer transition-colors"
                   >
-                    ✕ Recalculate Investigation report
+                    [ ↻ RE-RUN_MULTI_AGENT_WORKFLOW ]
                   </button>
-
                 </div>
               ) : (
-                <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-darkBorder rounded-xl p-8 text-center text-slate-500">
-                  <Cpu className="w-12 h-12 text-slate-700 mb-3 animate-pulse" />
-                  <h4 className="font-bold text-slate-300 text-sm">No Investigation Logged</h4>
-                  <p className="text-xs max-w-sm mt-1 leading-relaxed">
-                    Trigger the SentinelAI Security Agent to scan the event timelines, evaluate MITRE patterns, and formulate remediations.
+                <div className="flex-1 flex flex-col items-center justify-center border border-dashed border-[#255325] p-8 text-center space-y-3">
+                  <div className="text-[13px] text-[#ffffff] font-medium">
+                    [ NO_AI_INVESTIGATION_LOGGED ]
+                  </div>
+                  <p className="text-[11px] text-[#58ca58] max-w-sm leading-relaxed">
+                    Trigger the SentinelAI Multi-Agent SOC (Triage ➔ Forensics ➔ Containment) to analyze event timelines, query threat telemetry, and build SOAR remediation playbooks.
                   </p>
                   <button 
                     onClick={triggerAIInvestigation}
-                    className="mt-5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/10 cursor-pointer transition-all"
+                    className="mt-3 px-3 py-1.5 bg-[#66ff66] text-[#000000] hover:bg-[#ffffff] font-medium text-[11px] transition-colors cursor-pointer select-none"
                   >
-                    <Play className="w-3 h-3 fill-current" />
-                    Initialize AI Agent
+                    [ ⚡ INITIALIZE_MULTI_AGENT_SOC ↵ ]
                   </button>
                 </div>
               )}
             </div>
           )}
-
         </div>
-        
       </div>
-      
+
     </div>
   );
 };
+
 export default Investigation;

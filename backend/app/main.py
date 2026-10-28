@@ -17,6 +17,7 @@ from backend.app.api.logs import router as logs_router
 from backend.app.api.rules import router as rules_router
 from backend.app.api.incidents import router as incidents_router
 from backend.app.api.simulation import router as simulation_router
+from backend.app.api.soar import router as soar_router
 
 # Initialize Database tables
 Base.metadata.create_all(bind=engine)
@@ -45,6 +46,7 @@ app.include_router(logs_router, prefix=settings.API_V1_STR)
 app.include_router(rules_router, prefix=settings.API_V1_STR)
 app.include_router(incidents_router, prefix=settings.API_V1_STR)
 app.include_router(simulation_router, prefix=settings.API_V1_STR)
+app.include_router(soar_router, prefix=settings.API_V1_STR)
 
 @app.on_event("startup")
 def startup_event():
@@ -122,4 +124,15 @@ def health_check():
         "status": "healthy",
         "service": settings.PROJECT_NAME,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+
+@app.get("/api/ai/status")
+def get_ai_status():
+    """Returns AI provider connection state and active model."""
+    has_key = bool(settings.OPENROUTER_API_KEY)
+    return {
+        "provider": settings.AI_PROVIDER,
+        "model": settings.AI_MODEL,
+        "ai_enabled": has_key,
+        "detection_source": "cloud_ai" if has_key else "local_engine"
     }

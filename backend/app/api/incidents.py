@@ -15,8 +15,7 @@ router = APIRouter(prefix="/incidents", tags=["Incidents"])
 def list_incidents(
     status_filter: Optional[str] = None,
     severity_filter: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Lists security incidents, optional filtering by status and severity."""
     query = db.query(Incident)
@@ -30,8 +29,7 @@ def list_incidents(
 @router.get("/{incident_id}", response_model=IncidentDetailResponse)
 def get_incident(
     incident_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """Retrieves full details of a specific incident, including timeline events."""
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
@@ -115,15 +113,28 @@ async def run_ai_investigation(
     return incident
 
 @router.get("/{incident_id}/pdf")
-def export_incident_pdf(
+async def export_incident_pdf(
     incident_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
-    """Generates a downloadable PDF report for this incident."""
+    """Generates a downloadable comprehensive PDF report with OpenRouter AI analysis."""
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+        
+    # Automatically execute OpenRouter AI Multi-Agent analysis if not already populated
+    if not incident.ai_report:
+        try:
+            from backend.app.services.ai_agents import multi_agent_workflow
+            report_dict = await multi_agent_workflow.run_workflow(incident)
+            incident.ai_report = json.dumps(report_dict, indent=2)
+            if incident.status == "New":
+                incident.status = "Investigating"
+            db.commit()
+            db.refresh(incident)
+        except Exception as e:
+            print(f"[PDF EXPORT] Could not generate OpenRouter report: {e}")
+            db.rollback()
         
     pdf_content = generate_incident_pdf(incident)
     

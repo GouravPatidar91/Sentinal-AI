@@ -23,8 +23,17 @@ $sqli_body = @{
     src_ip = "198.51.100.55"
     process = "apache-access"
 } | ConvertTo-Json
+
 $res1 = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $sqli_body
-Write-Host "[+] Stage 1 Status: $($res1.status)" -ForegroundColor Green
+$rules1 = $res1.rules_matched -join ", "
+$inc1 = if ($res1.incident_id) { "Incident ID $($res1.incident_id) Created" } else { "None" }
+
+Write-Host "[+] Stage 1 Ingested -> Log ID: $($res1.log_id)" -ForegroundColor Green
+Write-Host "    |- Host       : $($res1.host) | Source: $($res1.source)" -ForegroundColor Gray
+Write-Host "    |- Attacker IP: $($res1.src_ip)" -ForegroundColor Gray
+Write-Host "    |- Severity   : $($res1.severity) | Anomaly Score: $($res1.anomaly_score)" -ForegroundColor Gray
+Write-Host "    |- Rules Hit  : $rules1" -ForegroundColor Yellow
+Write-Host "    |- Incident   : $inc1" -ForegroundColor Cyan
 
 Start-Sleep -Seconds 1
 
@@ -40,8 +49,17 @@ $traversal_body = @{
     src_ip = "198.51.100.55"
     process = "apache-access"
 } | ConvertTo-Json
+
 $res2 = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $traversal_body
-Write-Host "[+] Stage 2 Status: $($res2.status)" -ForegroundColor Green
+$rules2 = $res2.rules_matched -join ", "
+$inc2 = if ($res2.incident_id) { "Correlated to Incident ID $($res2.incident_id)" } else { "None" }
+
+Write-Host "[+] Stage 2 Ingested -> Log ID: $($res2.log_id)" -ForegroundColor Green
+Write-Host "    |- Host       : $($res2.host) | Source: $($res2.source)" -ForegroundColor Gray
+Write-Host "    |- Attacker IP: $($res2.src_ip)" -ForegroundColor Gray
+Write-Host "    |- Severity   : $($res2.severity) | Anomaly Score: $($res2.anomaly_score)" -ForegroundColor Gray
+Write-Host "    |- Rules Hit  : $rules2" -ForegroundColor Yellow
+Write-Host "    |- Incident   : $inc2" -ForegroundColor Cyan
 
 Start-Sleep -Seconds 1
 
@@ -57,8 +75,17 @@ $cmd_body = @{
     src_ip = "198.51.100.55"
     process = "apache-access"
 } | ConvertTo-Json
+
 $res3 = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $cmd_body
-Write-Host "[+] Stage 3 Status: $($res3.status)" -ForegroundColor Green
+$rules3 = $res3.rules_matched -join ", "
+$inc3 = if ($res3.incident_id) { "Escalated to CRITICAL in Incident ID $($res3.incident_id)" } else { "None" }
+
+Write-Host "[+] Stage 3 Ingested -> Log ID: $($res3.log_id)" -ForegroundColor Green
+Write-Host "    |- Host       : $($res3.host) | Source: $($res3.source)" -ForegroundColor Gray
+Write-Host "    |- Attacker IP: $($res3.src_ip)" -ForegroundColor Gray
+Write-Host "    |- Severity   : $($res3.severity) | Anomaly Score: $($res3.anomaly_score)" -ForegroundColor Gray
+Write-Host "    |- Rules Hit  : $rules3" -ForegroundColor Yellow
+Write-Host "    |- Incident   : $inc3" -ForegroundColor Cyan
 
 Write-Host "`n====================================================" -ForegroundColor Cyan
 Write-Host "[+] Multi-stage attack chain injected successfully!" -ForegroundColor Green

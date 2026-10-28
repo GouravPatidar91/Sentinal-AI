@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { ListRestart, Play, HelpCircle } from "lucide-react";
 import { useNotifications } from "../context/NotificationContext";
 import { API_BASE } from "../config/api";
 
@@ -103,73 +102,132 @@ export const Simulator: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 p-8 space-y-8 overflow-y-auto h-screen max-w-[calc(100vw-16rem)]">
+    <div className="flex-1 min-w-0 p-6 space-y-6 overflow-y-auto h-screen bg-[#000000] text-[#66ff66] font-mono select-text">
       
-      {/* Title */}
-      <div className="flex justify-between items-center border-b border-darkBorder pb-6">
-        <div>
-          <h2 className="text-3xl font-extrabold text-slate-100 tracking-wide flex items-center gap-3">
-            <ListRestart className="w-8 h-8 text-indigo-400" />
-            ATTACK PLAYBOOK SIMULATOR
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Trigger simulated security incidents to evaluate parser, ML, rules, and correlation engines
+      {/* Top Command Session Bar & Title */}
+      <div className="border border-[#255325] p-4 bg-[#000000]">
+        <div className="flex items-center justify-between text-[13px] border-b border-[#255325] pb-2 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[#255325] select-none">[00]</span>
+            <span className="text-[#66ff66]">
+              <span className="text-[#58ca58]">sentinel@soc:~$</span> sentinel --simulate attack-scenario --inject telemetry --target live-pipeline
+            </span>
+          </div>
+          <span className="px-2 py-0.5 bg-[#66ff66] text-[#000000] font-medium text-[11px] select-none">
+            [ CHANNEL: 05 // ATTACK_SIM ]
+          </span>
+        </div>
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+          <div>
+            <h1 className="text-[22px] sm:text-[26px] font-medium text-[#ffffff] tracking-tight uppercase">
+              Adversary Attack Simulator // Threat Injector
+            </h1>
+            <p className="text-[14px] text-[#58ca58] mt-1">
+              Inject synthetic multi-stage cyber attack vectors to evaluate normalization, ML anomaly scoring, and SOAR response.
+            </p>
+          </div>
+          <div className="text-[12px] text-[#58ca58] text-right font-mono shrink-0">
+            <div>TARGET_ENDPOINT: <span className="text-[#ffffff]">corp-dc-server01</span></div>
+            <div>STATUS: <span className="text-[#66ff66]">READY_TO_INJECT</span></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Simulator Architectural Info Callout */}
+      <div>
+        <div className="text-[12px] text-[#255325] mb-2 select-none">
+          [01] $ cat /etc/sentinel/simulator.conf
+        </div>
+
+        <div className="border border-[#255325] p-4 bg-[#000000] text-[12px] text-[#58ca58] space-y-2">
+          <div className="text-[#ffffff] font-medium">
+            // HOW THE SENTINELAI SIMULATION ENGINE WORKS:
+          </div>
+          <p className="leading-relaxed">
+            Each scenario sequentially transmits raw Windows Security EventLogs, Linux auth.log, or Apache access entries to the active WebSocket and database ingestion pipeline. Field normalization, unsupervised Isolation Forest anomaly scoring, Sigma correlation, and OpenRouter AI summaries will execute automatically.
           </p>
+          <div className="text-[11px] text-[#255325] pt-1 border-t border-[#255325]">
+            TIP: Keep the Dashboard or Incident Queue visible in a split window to observe real-time telemetry reaction.
+          </div>
         </div>
       </div>
 
-      {/* Simulator Info */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-darkBorder flex gap-3 text-xs text-slate-400 max-w-3xl leading-relaxed">
-        <HelpCircle className="w-5 h-5 text-indigo-400 shrink-0" />
-        <div>
-          <strong className="text-slate-200 block mb-1">How it works</strong>
-          Each simulator scenario sequentially injects realistic raw syslog/event records into the logs ingestion endpoint. The SentinelAI detection framework will dynamically parse fields, score ML anomalies, inspect rules, and correlate the sequence of events into active SOC incidents. Open the <strong>Dashboard</strong> or <strong>Incident Queue</strong> in another window to see updates occur in real-time.
+      {/* Scenarios Catalog Grid */}
+      <div>
+        <div className="text-[12px] text-[#255325] mb-2 select-none">
+          [02] $ sentinel --list scenarios --count {scenarios.length}
         </div>
-      </div>
 
-      {/* Grid of Scenarios */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {scenarios.map((scen) => (
-          <div key={scen.type} className="glass-card rounded-xl p-6 border flex flex-col justify-between h-72">
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{scen.category}</span>
-                <span className="bg-indigo-950/40 text-indigo-400 border border-indigo-900/40 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">
-                  Scenario
-                </span>
-              </div>
-              <h3 className="text-lg font-bold text-slate-200">{scen.name}</h3>
-              <p className="text-xs text-slate-400 leading-normal">{scen.description}</p>
-              
-              {/* Timeline graphic helper */}
-              <div className="pt-2">
-                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-2">Simulated steps:</span>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {scen.timeline.map((step, i) => (
-                    <React.Fragment key={step}>
-                      <span className="bg-slate-900/80 border border-darkBorder rounded text-[9px] text-slate-400 px-2 py-1 leading-none">
-                        {step}
-                      </span>
-                      {i < scen.timeline.length - 1 && <span className="text-[9px] text-slate-700 font-bold">→</span>}
-                    </React.Fragment>
-                  ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {scenarios.map((scen, idx) => {
+            const num = (idx + 1).toString().padStart(2, "0");
+            const isInjecting = loadingType === scen.type;
+
+            return (
+              <div 
+                key={scen.type} 
+                className="border border-[#255325] hover:border-[#66ff66] p-5 bg-[#000000] flex flex-col justify-between transition-colors"
+              >
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center border-b border-[#255325] pb-2 text-[11px]">
+                    <span className="text-[#255325] font-mono font-medium">
+                      VECTOR [{num}] // [{scen.category.toUpperCase()}]
+                    </span>
+                    <span className="text-[#66ff66] border border-[#255325] px-1.5 py-0.5 select-none">
+                      [TTP_PLAYBOOK]
+                    </span>
+                  </div>
+
+                  <div>
+                    <h3 className="font-medium text-[#ffffff] text-[15px]">
+                      {scen.name}
+                    </h3>
+                    <p className="text-[12px] text-[#58ca58] mt-1 leading-relaxed">
+                      {scen.description}
+                    </p>
+                  </div>
+
+                  {/* Execution Timeline Steps */}
+                  <div className="pt-2">
+                    <span className="text-[10px] text-[#255325] uppercase tracking-wider block mb-1.5">
+                      // EXECUTION_SEQUENCE:
+                    </span>
+                    <div className="space-y-1">
+                      {scen.timeline.map((step) => (
+                        <div key={step} className="flex items-center gap-2 text-[11px] text-[#58ca58]">
+                          <span className="text-[#255325] select-none">&gt;_</span>
+                          <span className="truncate">{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 pt-3 border-t border-[#255325]">
+                  <button
+                    onClick={() => handleTriggerSimulation(scen.type)}
+                    disabled={loadingType !== null}
+                    className={`w-full py-2 px-3 text-[12px] font-medium transition-colors select-none text-center cursor-pointer ${
+                      isInjecting
+                        ? "bg-[#255325] text-[#ffffff] cursor-wait"
+                        : "bg-[#66ff66] text-[#000000] hover:bg-[#ffffff]"
+                    }`}
+                  >
+                    {isInjecting 
+                      ? "[ INJECTING_ATTACK_TELEMETRY... █ ]" 
+                      : "[ ⚡ LAUNCH_ATTACK_VECTOR ↵ ]"
+                    }
+                  </button>
                 </div>
               </div>
-            </div>
-
-            <button
-              onClick={() => handleTriggerSimulation(scen.type)}
-              disabled={loadingType !== null}
-              className="mt-6 w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white rounded-lg py-2.5 text-xs font-bold tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/10 hover:shadow-indigo-500/25 transition-all cursor-pointer"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              {loadingType === scen.type ? "Injecting logs..." : "Execute Simulation"}
-            </button>
-          </div>
-        ))}
+            );
+          })}
+        </div>
       </div>
 
     </div>
   );
 };
+
 export default Simulator;

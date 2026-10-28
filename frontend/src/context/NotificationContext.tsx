@@ -6,11 +6,17 @@ export interface AlertNotification {
   message: string;
   severity: "INFO" | "WARNING" | "HIGH" | "CRITICAL";
   timestamp: Date;
+  detectionSource?: "SENTINEL_AI" | "SENTINEL_LOCAL_ENGINE";
 }
 
 interface NotificationContextType {
   notifications: AlertNotification[];
-  triggerNotification: (title: string, message: string, severity: AlertNotification["severity"]) => void;
+  triggerNotification: (
+    title: string, 
+    message: string, 
+    severity: AlertNotification["severity"],
+    detectionSource?: "SENTINEL_AI" | "SENTINEL_LOCAL_ENGINE"
+  ) => void;
   removeNotification: (id: string) => void;
   clearAll: () => void;
   isOpen: boolean;
@@ -34,15 +40,28 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const triggerNotification = useCallback((
     title: string, 
     message: string, 
-    severity: AlertNotification["severity"]
+    severity: AlertNotification["severity"],
+    detectionSource?: "SENTINEL_AI" | "SENTINEL_LOCAL_ENGINE"
   ) => {
     const id = Math.random().toString(36).substring(2, 9);
+    
+    // Auto-determine detectionSource if omitted
+    let source = detectionSource;
+    if (!source) {
+      if (title.includes("Sentinel AI Alert") || title.includes("OpenRouter")) {
+        source = "SENTINEL_AI";
+      } else {
+        source = "SENTINEL_LOCAL_ENGINE";
+      }
+    }
+
     const newNotif: AlertNotification = {
       id,
       title,
       message,
       severity,
-      timestamp: new Date()
+      timestamp: new Date(),
+      detectionSource: source
     };
     
     setNotifications((prev) => [newNotif, ...prev].slice(0, 40)); // Keep last 40 alerts

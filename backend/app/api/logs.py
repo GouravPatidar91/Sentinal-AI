@@ -1,5 +1,4 @@
-import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from backend.app.models.database import get_db
@@ -9,15 +8,18 @@ from backend.app.services.normalization import normalize_log
 from backend.app.services.detection import evaluate_log_rules
 from backend.app.services.anomaly import anomaly_detector
 from backend.app.services.correlation import correlate_event
+from backend.app.services.ai_agents import auto_analyze_incident_openrouter
 from backend.app.services.websocket import manager
+from backend.app.core.config import settings
 
 router = APIRouter(prefix="/logs", tags=["Logs"])
 
 @router.post("/ingest")
-async def ingest_log(payload: LogCreate, db: Session = Depends(get_db)):
+async def ingest_log(payload: LogCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Ingests a log entry, normalizes it, detects threats, runs anomaly scoring,
     performs event correlation, and broadcasts live updates via WebSockets.
+    Automatically triggers OpenRouter analysis for High/Critical threats.
     """
     try:
         # 1. Normalize Log
@@ -72,14 +74,21 @@ async def ingest_log(payload: LogCreate, db: Session = Depends(get_db)):
                 # Update incident anomaly score (max of current incident score and new log score)
                 incident.anomaly_score = max(incident.anomaly_score, anomaly_score)
                 db.commit()
+
+                # Trigger background OpenRouter analysis for High/Critical threats
+                if incident.severity in ["HIGH", "CRITICAL"] or incident.risk_score >= 60:
+                    background_tasks.add_task(auto_analyze_incident_openrouter, incident.id)
                 
         # Commit database transaction
         db.commit()
         db.refresh(log_entry)
         
         # 6. Real-Time Broadcast via WebSockets
+        has_cloud_ai = bool(settings.OPENROUTER_API_KEY)
         broadcast_msg = {
             "type": "NEW_LOG",
+            "ai_enabled": has_cloud_ai,
+            "detection_source": "cloud_ai" if has_cloud_ai else "local_engine",
             "log": {
                 "id": log_entry.id,
                 "timestamp": log_entry.timestamp.isoformat(),
@@ -118,12 +127,26 @@ async def ingest_log(payload: LogCreate, db: Session = Depends(get_db)):
             
         await manager.broadcast(broadcast_msg)
         
+        # Terminal log for guide/professor live demonstration
+        rules_str = ", ".join([r.name for r in matched_rules]) if matched_rules else "None"
+        inc_str = f"Incident #{incident.id} ({incident.severity})" if incident else "None"
+        print(f"[REST INGEST] Log #{log_entry.id} | Host: {log_entry.host} | IP: {log_entry.src_ip or '-'} | User: {log_entry.username or '-'} | Sev: {log_entry.severity} | Rules: [{rules_str}] | Inc: {inc_str}")
+
         return {
             "status": "success",
             "log_id": log_entry.id,
+            "timestamp": log_entry.timestamp.isoformat() if log_entry.timestamp else None,
+            "host": log_entry.host,
+            "source": log_entry.source,
+            "src_ip": log_entry.src_ip,
+            "dst_ip": log_entry.dst_ip,
+            "username": log_entry.username,
+            "process": log_entry.process,
+            "severity": log_entry.severity,
+            "message": log_entry.message,
             "rules_matched": [r.name for r in matched_rules],
             "incident_id": incident.id if incident else None,
-            "anomaly_score": anomaly_score
+            "anomaly_score": round(anomaly_score, 4)
         }
         
     except Exception as e:

@@ -107,6 +107,7 @@ class IncidentEventResponse(BaseModel):
     description: str
     order_index: int
     rule: Optional[RuleResponse] = None
+    log_entry: Optional[LogResponse] = None
 
     class Config:
         from_attributes = True
@@ -132,8 +133,32 @@ class IncidentUpdate(BaseModel):
     severity: Optional[str] = None
     risk_score: Optional[int] = None
 
+class SOARActionCreate(BaseModel):
+    incident_id: Optional[int] = None
+    action_type: str  # KILL_PROCESS, BLOCK_IP, QUARANTINE_INTERFACE, DISABLE_USER
+    target_host: str
+    payload: str
+    description: str
+
+class SOARActionResponse(BaseModel):
+    id: int
+    incident_id: Optional[int]
+    action_type: str
+    target_host: str
+    payload: str
+    description: str
+    status: str
+    executed_by_id: Optional[int]
+    output: Optional[str]
+    created_at: datetime
+    executed_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
 class IncidentDetailResponse(IncidentResponse):
     events: List[IncidentEventResponse] = []
+    soar_actions: List[SOARActionResponse] = []
     ai_report: Optional[str] = None
 
     class Config:
@@ -157,3 +182,4 @@ class SearchQuery(BaseModel):
     mitre_technique: Optional[str] = None
     threat_type: Optional[str] = None
     severity: Optional[str] = None
+

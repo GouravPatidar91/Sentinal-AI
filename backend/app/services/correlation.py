@@ -22,12 +22,26 @@ def correlate_event(db: Session, log: LogEntry, matched_rules: List[DetectionRul
     # Search for an existing "active" incident associated with this Host, IP, or Username in the last 15 mins
     from sqlalchemy import or_
     
-    # Build list of potential correlation hooks
-    correlation_filters = [Incident.title.contains(log.host)]
-    if log.src_ip:
-        correlation_filters.append(Incident.description.contains(log.src_ip))
-    if log.username:
-        correlation_filters.append(Incident.description.contains(log.username))
+    # Check if this rule is an authentication/credential failure rule
+    is_credential_failure = (
+        primary_rule.technique in ["T1110", "T1078"] or
+        primary_rule.tactic == "Credential Access" or
+        "bruteforce" in primary_rule.name.lower() or
+        "failure" in primary_rule.name.lower() or
+        (log.process and any(p in log.process for p in ["4625", "sshd"]))
+    )
+
+    # Build list of correlation hooks
+    # For credential failures, correlate strictly by target host and username to avoid private LAN NAT bleeding
+    if is_credential_failure:
+        correlation_filters = [Incident.title.contains(log.host)]
+    else:
+        correlation_filters = [Incident.title.contains(log.host)]
+        # Only correlate by IP for public/external attacker IPs (not private LAN subnets)
+        if log.src_ip and not log.src_ip.startswith(("127.", "192.168.", "10.")):
+            correlation_filters.append(Incident.description.contains(log.src_ip))
+        if log.username:
+            correlation_filters.append(Incident.description.contains(log.username))
 
     existing_incident = db.query(Incident).filter(
         Incident.status.in_(["New", "Investigating"]),
@@ -86,27 +100,44 @@ def correlate_event(db: Session, log: LogEntry, matched_rules: List[DetectionRul
         
     else:
         # Create a NEW incident
-        # Check severity threshold - We create incidents for WARNING, HIGH, CRITICAL rules
+        # Distinguish between high-certainty single events (SQLi, command injection)
+        # and authentication failure events that require multi-factor thresholding.
         rule_severity = primary_rule.severity.upper()
-        if rule_severity not in ["WARNING", "HIGH", "CRITICAL"]:
-            # Check if there are multiple failed logins recently that haven't been correlated yet
-            # e.g., if there were 3+ failed logins in the last 5 mins, escalate to brute force incident
-            recent_fails = db.query(LogEntry).filter(
+        
+        # Check if rule is an authentication/credential failure rule
+        is_credential_failure = (
+            primary_rule.technique in ["T1110", "T1078"] or
+            primary_rule.tactic == "Credential Access" or
+            "bruteforce" in primary_rule.name.lower() or
+            "failure" in primary_rule.name.lower() or
+            (log.process and any(p in log.process for p in ["4625", "sshd"]))
+        )
+        
+        if is_credential_failure:
+            # Multi-factor authentication defense:
+            # Distinguish benign human error (e.g. forgot password, 1-2 typos) from brute-force attack.
+            # Factor 1: Sliding Time Window (5 minutes)
+            # Factor 2: Frequency Threshold (>= 3 attempts)
+            # Factor 3: Host & User correlation
+            fail_query = db.query(LogEntry).filter(
                 LogEntry.timestamp >= (datetime.datetime.utcnow() - datetime.timedelta(minutes=5)),
                 LogEntry.host == log.host,
-                LogEntry.process.in_(["WinEventLog:4625", "sshd"]),
-                LogEntry.severity == "WARNING"
-            ).count()
+                LogEntry.severity.in_(["WARNING", "HIGH", "ERROR"])
+            )
+            if log.username:
+                fail_query = fail_query.filter(LogEntry.username == log.username)
+            recent_fails = fail_query.count()
             
             if recent_fails < 3:
-                # Do not escalate a single low-severity log to an Incident
+                # Do not escalate 1 or 2 isolated failed attempts to an Incident.
+                # The log remains stored in DB for auditing, but avoids false-positive dashboard alarms.
                 return None
                 
-            # If we have 3+ fails, escalate and create brute force incident
+            # If 3+ failed logins occur within the 5-minute window, escalate to Brute Force incident
             incident_title = f"Brute Force Authentication Attempt Detected on {log.host.upper()}"
-            incident_desc = f"Detected {recent_fails} failed login attempts on host '{log.host}' from IP '{log.src_ip or 'unknown'}'. This matches brute-force credential guessing."
+            incident_desc = f"Detected {recent_fails} failed login attempts on host '{log.host}' within 5 minutes from IP '{log.src_ip or 'unknown'}'. Exceeds threshold (>=3), indicating automated credential guessing."
             severity = "HIGH"
-        else:
+        elif rule_severity in ["WARNING", "HIGH", "CRITICAL"]:
             incident_title = f"Threat Detected: {primary_rule.name} on {log.host.upper()}"
             incident_desc = f"Security rule '{primary_rule.name}' triggered on host '{log.host}'. Message: {log.message}."
             if log.src_ip:
@@ -114,6 +145,9 @@ def correlate_event(db: Session, log: LogEntry, matched_rules: List[DetectionRul
             if log.username:
                 incident_desc += f" Target User: {log.username}."
             severity = primary_rule.severity
+        else:
+            # Low or Info level rules do not spawn new incidents
+            return None
             
         new_incident = Incident(
             title=incident_title,

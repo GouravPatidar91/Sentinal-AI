@@ -1,6 +1,6 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ShieldAlert, Lock, User, AlertCircle } from "lucide-react";
 import { API_BASE } from "../config/api";
 
 export const Login: React.FC = () => {
@@ -30,82 +30,114 @@ export const Login: React.FC = () => {
 
       if (!resp.ok) {
         const errData = await resp.json();
-        throw new Error(errData.detail || "Authentication failed");
+        throw new Error(errData.detail || "Authentication verification failed");
       }
 
       const data = await resp.json();
       login(data.access_token, data.username, data.role);
     } catch (err: any) {
-      setError(err.message || "Failed to connect to backend server");
+      setError(err.message || "Failed to connect to backend authentication service");
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen w-screen flex items-center justify-center bg-darkBg cyber-grid p-4 relative overflow-hidden">
-      {/* Background glow graphics */}
-      <div className="absolute top-1/4 left-1/3 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl" />
-      <div className="absolute bottom-1/4 right-1/3 w-96 h-96 bg-red-600/5 rounded-full blur-3xl" />
+  const handleAutofill = (u: string, p: string) => {
+    setUsername(u);
+    setPassword(p);
+  };
 
-      {/* Login Card */}
-      <div className="w-full max-w-md glass-card rounded-2xl p-8 relative z-10 border border-slate-800 shadow-2xl">
+  return (
+    <div className="min-h-screen w-screen flex flex-col items-center justify-center bg-[#000000] text-[#66ff66] font-mono p-4 select-text">
+      
+      {/* Return Link to Landing Page */}
+      <div className="w-full max-w-lg mb-3 flex justify-between items-center text-[12px]">
+        <Link 
+          to="/" 
+          className="text-[#58ca58] hover:text-[#000000] hover:bg-[#66ff66] px-2 py-0.5 border border-[#255325] transition-colors select-none"
+        >
+          [ ← RETURN_TO_MANUAL ]
+        </Link>
+        <span className="text-[#255325]">
+          SESSION_PORT: 5173 // TLS_1.3
+        </span>
+      </div>
+
+      {/* Main Terminal Login Dossier */}
+      <div className="w-full max-w-lg border border-[#255325] bg-[#000000] p-6 sm:p-8 space-y-6">
         
-        {/* Brand */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-xl bg-red-600/10 border border-red-500/30 flex items-center justify-center mb-3">
-            <ShieldAlert className="w-8 h-8 text-red-500 animate-pulse" />
+        {/* Command Callout Header */}
+        <div className="border-b border-[#255325] pb-4">
+          <div className="flex items-center justify-between text-[12px] pb-2 mb-2 border-b border-[#255325]/50">
+            <div className="flex items-center gap-2">
+              <span className="text-[#255325] select-none">[00]</span>
+              <span className="text-[#66ff66]">
+                <span className="text-[#58ca58]">auth@soc:~$</span> sentinel --authenticate --token bearer
+              </span>
+            </div>
+            <span className="px-1.5 py-0.2 bg-[#66ff66] text-[#000000] font-medium text-[10px] select-none">
+              [LOCKED]
+            </span>
           </div>
-          <h2 className="text-2xl font-bold text-slate-100 tracking-wider">SENTINELAI</h2>
-          <span className="text-xs text-slate-500 uppercase tracking-widest font-semibold mt-1">
-            Autonomous SOC & Investigation Platform
-          </span>
+
+          <h1 className="text-[20px] font-bold text-[#ffffff] tracking-tight uppercase">
+            SENTINEL_AI // SYS_AUTH_CONSOLE
+          </h1>
+          <p className="text-[12px] text-[#58ca58] mt-1 leading-relaxed">
+            Autonomous Cyber Threat Defense System. Please provide authorized operator credentials to establish encrypted telemetry channel.
+          </p>
         </div>
 
-        {/* Error Alert */}
+        {/* Error Alert Box */}
         {error && (
-          <div className="mb-6 p-4 rounded-lg bg-red-950/40 border border-red-900/50 text-red-200 text-sm flex gap-3 items-start">
-            <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-            <span>{error}</span>
+          <div className="p-3 border border-[#66ff66] bg-[#255325]/20 text-[12px] text-[#ffffff] space-y-1">
+            <div className="font-bold text-[#66ff66] text-[11px]">
+              [ ! ] AUTHENTICATION_REJECTED:
+            </div>
+            <div className="text-[#ffffff] leading-relaxed">
+              {error}
+            </div>
           </div>
         )}
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Credentials Form */}
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-              Analyst Username
-            </label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3">
-                <User className="w-4 h-4 text-slate-500" />
-              </span>
+            <div className="flex justify-between items-center text-[11px] mb-1.5">
+              <label className="text-[#58ca58] uppercase">
+                [01] $ enter --username &lt;analyst_id&gt;
+              </label>
+              <span className="text-[#255325]">REQUIRED</span>
+            </div>
+            <div className="relative flex items-center border border-[#255325] focus-within:border-[#66ff66] transition-colors bg-[#000000]">
+              <span className="text-[#58ca58] text-[12px] pl-3 select-none">&gt;</span>
               <input
                 type="text"
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="e.g. admin or analyst"
-                className="w-full bg-slate-900/60 border border-slate-800 focus:border-blue-500 rounded-lg py-2.5 pl-10 pr-4 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors"
+                className="w-full bg-transparent py-2 px-3 text-[13px] text-[#ffffff] placeholder-[#255325] outline-none font-mono"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-              Security Credentials
-            </label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3">
-                <Lock className="w-4 h-4 text-slate-500" />
-              </span>
+            <div className="flex justify-between items-center text-[11px] mb-1.5">
+              <label className="text-[#58ca58] uppercase">
+                [02] $ enter --password &lt;secret_key&gt;
+              </label>
+              <span className="text-[#255325]">REQUIRED</span>
+            </div>
+            <div className="relative flex items-center border border-[#255325] focus-within:border-[#66ff66] transition-colors bg-[#000000]">
+              <span className="text-[#58ca58] text-[12px] pl-3 select-none">&gt;</span>
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full bg-slate-900/60 border border-slate-800 focus:border-blue-500 rounded-lg py-2.5 pl-10 pr-4 text-sm text-slate-100 placeholder-slate-600 outline-none transition-colors"
+                className="w-full bg-transparent py-2 px-3 text-[13px] text-[#ffffff] placeholder-[#255325] outline-none font-mono"
               />
             </div>
           </div>
@@ -113,29 +145,58 @@ export const Login: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white rounded-lg py-2.5 text-sm font-semibold tracking-wide shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+            className="w-full py-2.5 px-4 bg-[#66ff66] text-[#000000] hover:bg-[#ffffff] font-medium text-[13px] transition-colors cursor-pointer select-none text-center block disabled:opacity-50"
           >
-            {loading ? "Authenticating..." : "Establish Secure Session"}
+            {loading ? "[ AUTHENTICATING_CREDENTIALS... █ ]" : "[ ↵ ESTABLISH_SECURE_SESSION ]"}
           </button>
         </form>
 
-        {/* Demo Credentials Info */}
-        <div className="mt-8 pt-6 border-t border-slate-900 text-center">
-          <span className="text-[10px] text-slate-500 font-semibold tracking-widest uppercase block mb-3">
-            Default Credentials (seeding)
-          </span>
-          <div className="bg-slate-950/50 border border-slate-900 rounded-lg p-3 text-[11px] font-mono text-slate-400 flex flex-col gap-1.5 align-middle justify-center">
-            <div>
-              <span className="text-blue-400">Admin:</span> admin <span className="opacity-40">/</span> admin123
+        {/* Seed Identities Diagnostic Box */}
+        <div className="border-t border-[#255325] pt-4 space-y-3">
+          <div className="flex justify-between items-center text-[10px] text-[#255325]">
+            <span>[03] $ cat /etc/sentinel/seed_identities.conf</span>
+            <span>DEV_SEEDS</span>
+          </div>
+
+          <div className="border border-[#255325] p-3 bg-[#000000] space-y-2 text-[11px]">
+            <div className="flex justify-between items-center border-b border-[#255325]/40 pb-1.5">
+              <div>
+                <span className="text-[#ffffff] font-medium">ROLE [ADMIN]:</span>
+                <span className="text-[#58ca58] ml-2">admin / admin123</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAutofill("admin", "admin123")}
+                className="text-[10px] border border-[#255325] text-[#58ca58] hover:text-[#000000] hover:bg-[#66ff66] px-1.5 py-0.5 cursor-pointer transition-colors"
+              >
+                [ AUTOFILL ]
+              </button>
             </div>
-            <div>
-              <span className="text-teal-400">Analyst:</span> analyst <span className="opacity-40">/</span> analyst123
+
+            <div className="flex justify-between items-center pt-0.5">
+              <div>
+                <span className="text-[#ffffff] font-medium">ROLE [ANALYST]:</span>
+                <span className="text-[#58ca58] ml-2">analyst / analyst123</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAutofill("analyst", "analyst123")}
+                className="text-[10px] border border-[#255325] text-[#58ca58] hover:text-[#000000] hover:bg-[#66ff66] px-1.5 py-0.5 cursor-pointer transition-colors"
+              >
+                [ AUTOFILL ]
+              </button>
             </div>
           </div>
         </div>
 
       </div>
+
+      {/* Terminal System Footer Note */}
+      <div className="mt-4 text-[11px] text-[#255325] text-center">
+        SENTINEL_AI CORE v2.4 // AUTHORIZED ACCESS ONLY // INCIDENTS MONITORED
+      </div>
     </div>
   );
 };
+
 export default Login;

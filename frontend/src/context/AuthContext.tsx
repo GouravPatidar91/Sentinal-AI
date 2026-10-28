@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState } from "react";
 
 interface User {
   username: string;
@@ -17,20 +17,12 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Restore session on mount
-    const savedToken = localStorage.getItem("token");
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem("token"));
+  const [user, setUser] = useState<User | null>(() => {
     const savedUser = localStorage.getItem("username");
     const savedRole = localStorage.getItem("role");
-
-    if (savedToken && savedUser && savedRole) {
-      setToken(savedToken);
-      setUser({ username: savedUser, role: savedRole });
-    }
-  }, []);
+    return savedUser && savedRole ? { username: savedUser, role: savedRole } : null;
+  });
 
   const login = (jwtToken: string, username: string, role: string) => {
     localStorage.setItem("token", jwtToken);

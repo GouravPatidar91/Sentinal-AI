@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     OLLAMA_URL: str = "http://localhost:11434"
     AI_PROVIDER: str = "openrouter"  # openrouter, gemini, openai, ollama
-    AI_MODEL: Optional[str] = "meta-llama/llama-3.3-70b-instruct:free"  # e.g. meta-llama/llama-3.3-70b-instruct:free or google/gemini-2.0-flash-lite-preview-02-05:free
+    AI_MODEL: Optional[str] = "nvidia/nemotron-3.5-lightning:free"  # Ultra-fast low latency inference
     
     # Notifications / Email (Mocked by default)
     SMTP_SERVER: str = "localhost"

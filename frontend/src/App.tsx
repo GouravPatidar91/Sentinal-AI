@@ -13,6 +13,7 @@ import Investigation from "./pages/Investigation";
 import RulesManager from "./pages/RulesManager";
 import SearchLogs from "./pages/Search";
 import Simulator from "./pages/Simulator";
+import LandingPage from "./pages/LandingPage";
 
 // Helper components for layout and auth guards
 const PrivateLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -23,9 +24,9 @@ const PrivateLayout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }
 
   return (
-    <div className="flex h-screen w-screen bg-darkBg text-slate-100 overflow-hidden">
+    <div className="flex h-screen w-screen bg-[#000000] text-[#66ff66] font-mono overflow-hidden">
       <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#000000]">
         {children}
       </div>
       <AlertFeedPanel />
@@ -37,7 +38,7 @@ const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
   
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
   
   return <>{children}</>;
@@ -49,6 +50,9 @@ export const App: React.FC = () => {
       <AuthProvider>
         <NotificationProvider>
           <Routes>
+            {/* Public Showcase Landing Page */}
+            <Route path="/" element={<LandingPage />} />
+
             {/* Public Auth Route */}
             <Route 
               path="/login" 
@@ -61,7 +65,7 @@ export const App: React.FC = () => {
 
             {/* Protected SOC Panel Routes */}
             <Route 
-              path="/" 
+              path="/dashboard" 
               element={
                 <PrivateLayout>
                   <Dashboard />

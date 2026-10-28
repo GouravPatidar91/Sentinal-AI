@@ -12,14 +12,14 @@ from dotenv import load_dotenv
 # Load agent environment variables
 load_dotenv()
 
-BACKEND_URL = os.getenv("BACKEND_URL", "https://sentinal-ai-gr33.onrender.com/api/logs/ingest")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api/logs/ingest")
 HOST_NAME = os.getenv("HOST_NAME", socket.gethostname().lower())
 SYSLOG_PORT = int(os.getenv("SYSLOG_PORT", "5140"))  # Default 5140 (non-root port) for firewall syslog receipt
 
 # Global flag to control execution
 running = True
 
-def send_log_to_backend(raw_log: str, source: str, severity: str = "INFO", process: str = None, username: str = None):
+def send_log_to_backend(raw_log: str, source: str, severity: str = "INFO", process: str = None, username: str = None, src_ip: str = None):
     """
     HTTP client helper to stream parsed logs to the backend ingestion API.
     """
@@ -29,6 +29,7 @@ def send_log_to_backend(raw_log: str, source: str, severity: str = "INFO", proce
         "log_type": "Generic", # Backend will resolve based on source
         "severity": severity,
         "username": username,
+        "src_ip": src_ip,
         "process": process,
         "message": raw_log.strip(),
         "raw_log": raw_log
@@ -37,11 +38,22 @@ def send_log_to_backend(raw_log: str, source: str, severity: str = "INFO", proce
     try:
         resp = requests.post(BACKEND_URL, json=payload, timeout=3)
         if resp.status_code == 200:
-            print(f"[Streaming Success] Sent log from {source} - Status: {resp.json().get('status')}")
+            data = resp.json()
+            log_id = data.get("log_id", "?")
+            rules = data.get("rules_matched", [])
+            inc_id = data.get("incident_id")
+            
+            # Formatted transmission feedback for live demonstration
+            msg_snippet = (payload["message"][:50] + "...") if len(payload["message"]) > 50 else payload["message"]
+            alert_tag = f" -> Matched: {rules}" if rules else ""
+            inc_tag = f" [ALERT: INCIDENT #{inc_id}]" if inc_id else ""
+            
+            print(f"[STREAM SUCCESS] Log #{log_id} | Host: {HOST_NAME} | Source: {source} | User: {username or '-'} | Sev: {severity}{inc_tag}")
+            print(f"  └─ Payload: \"{msg_snippet}\"{alert_tag}")
         else:
-            print(f"[Streaming Warning] Backend returned code {resp.status_code}: {resp.text}")
+            print(f"[STREAM WARNING] Backend returned code {resp.status_code}: {resp.text}")
     except Exception as e:
-        print(f"[Streaming Error] Failed to connect to backend: {e}")
+        print(f"[STREAM ERROR] Failed to connect to backend: {e}")
 
 # ----------------------------------------------------
 # Syslog UDP Firewall Receiver
@@ -168,10 +180,22 @@ def start_windows_log_collector():
             try:
                 # Open Windows Event log
                 hand = win32evtlog.OpenEventLog(server, logtype)
-                flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
                 
-                # Seek to current events by reading existing
-                _ = win32evtlog.ReadEventLog(hand, flags, 0)
+                # Seek to current events by moving cursor to the end
+                total = win32evtlog.GetNumberOfEventLogRecords(hand)
+                oldest = win32evtlog.GetOldestEventLogRecord(hand)
+                if total > 0:
+                    last_rec = oldest + total - 1
+                    seek_flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEEK_READ
+                    try:
+                        # Read the last event to position the cursor
+                        win32evtlog.ReadEventLog(hand, seek_flags, last_rec)
+                        print(f"[*] Positioned event log reader at end record: {last_rec}")
+                    except Exception as seek_err:
+                        print(f"[-] Warning: Failed to seek to end of event log: {seek_err}")
+                
+                # Read forwards sequentially from the cursor position
+                flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
                 
                 while running:
                     events = win32evtlog.ReadEventLog(hand, flags, 0)
@@ -202,6 +226,107 @@ def start_windows_log_collector():
         t.start()
 
 # ----------------------------------------------------
+# SOAR Command Execution Listener & Remediation Engine
+# ----------------------------------------------------
+import subprocess
+
+def execute_soar_command(action: dict):
+    """
+    Executes OS-level SOAR containment actions dispatched by the backend.
+    Supported Actions:
+      - KILL_PROCESS (PID)
+      - BLOCK_IP (Attacker IP)
+      - QUARANTINE_INTERFACE (Interface Name)
+      - DISABLE_USER (Username)
+    """
+    action_id = action.get("id")
+    action_type = action.get("action_type", "").upper()
+    payload = action.get("payload", "").strip()
+    target_host = action.get("target_host", "").lower()
+    
+    # Verify command is intended for this host
+    if target_host and target_host not in [HOST_NAME, "localhost", "127.0.0.1", "web-server-prod", "desktop-hg34g7h"]:
+        return
+
+    print(f"\n[SOAR EXECUTOR] Received approved action #{action_id}: {action_type} -> Payload: '{payload}'")
+
+    os_type = platform.system().lower()
+    cmd = []
+    output_log = ""
+    status_result = "EXECUTED"
+
+    try:
+        if action_type == "KILL_PROCESS":
+            if "windows" in os_type:
+                cmd = ["powershell", "-Command", f"Stop-Process -Id {payload} -Force"]
+            else:
+                cmd = ["kill", "-9", payload]
+
+        elif action_type == "BLOCK_IP":
+            if "windows" in os_type:
+                cmd = ["netsh", "advfirewall", "firewall", "add", "rule", f"name=SentinelBlock_{payload}", "dir=in", "action=block", f"remoteip={payload}"]
+            else:
+                cmd = ["iptables", "-A", "INPUT", "-s", payload, "-j", "DROP"]
+
+        elif action_type == "QUARANTINE_INTERFACE":
+            if "windows" in os_type:
+                cmd = ["netsh", "interface", "set", "interface", f"name={payload}", "admin=disable"]
+            else:
+                cmd = ["ip", "link", "set", payload, "down"]
+
+        elif action_type == "DISABLE_USER":
+            if "windows" in os_type:
+                cmd = ["powershell", "-Command", f"Disable-LocalUser -Name '{payload}'"]
+            else:
+                cmd = ["usermod", "-L", payload]
+
+        else:
+            output_log = f"Unsupported SOAR Action type: {action_type}"
+            status_result = "FAILED"
+
+        if cmd:
+            print(f"[SOAR EXECUTOR] Running command: {' '.join(cmd)}")
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            output_log = res.stdout or res.stderr or f"Command executed cleanly with returncode {res.returncode}"
+            if res.returncode != 0:
+                status_result = "FAILED"
+
+    except Exception as e:
+        status_result = "FAILED"
+        output_log = f"Execution exception: {e}"
+
+    print(f"[SOAR EXECUTOR] Result for Action #{action_id}: {status_result} | Log: {output_log}")
+
+    # Report execution result back to backend
+    base_api = BACKEND_URL.rsplit("/api/", 1)[0]
+    report_url = f"{base_api}/api/soar/report_execution/{action_id}"
+    try:
+        requests.post(report_url, params={"status_result": status_result, "output": output_log[:500]}, timeout=5)
+    except Exception as err:
+        print(f"[SOAR EXECUTOR] Failed to report execution result to backend: {err}")
+
+
+def poll_soar_commands():
+    """
+    Periodically polls the backend for APPROVED SOAR actions waiting for target execution.
+    """
+    print("[*] Starting SOAR Command Listener thread...")
+    base_api = BACKEND_URL.rsplit("/api/", 1)[0]
+    soar_url = f"{base_api}/api/soar/actions"
+    
+    while running:
+        try:
+            resp = requests.get(soar_url, params={"status_filter": "APPROVED"}, timeout=4)
+            if resp.status_code == 200:
+                actions = resp.json()
+                for action in actions:
+                    execute_soar_command(action)
+        except Exception:
+            pass
+        time.sleep(5)
+
+
+# ----------------------------------------------------
 # Main Agent Loop
 # ----------------------------------------------------
 def main():
@@ -217,8 +342,12 @@ def main():
     # 1. Start Firewall Syslog server (UDP)
     syslog_thread = threading.Thread(target=start_syslog_server, daemon=True)
     syslog_thread.start()
+
+    # 2. Start SOAR Command Listener
+    soar_thread = threading.Thread(target=poll_soar_commands, daemon=True)
+    soar_thread.start()
     
-    # 2. Start OS-specific log collectors
+    # 3. Start OS-specific log collectors
     os_type = platform.system().lower()
     if "windows" in os_type:
         start_windows_log_collector()
@@ -227,8 +356,7 @@ def main():
     else:
         print("[!] Unsupported operating system for direct OS log collection. Generic mode activated.")
 
-    # 3. Apache Web Logs Tailing (if file exists locally)
-    # Check common Apache paths
+    # 4. Apache Web Logs Tailing (if file exists locally)
     apache_paths = [
         "C:\\xampp\\apache\\logs\\access.log",
         "/var/log/apache2/access.log",
@@ -252,3 +380,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

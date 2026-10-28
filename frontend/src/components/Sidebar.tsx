@@ -1,15 +1,5 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { 
-  ShieldAlert, 
-  LayoutDashboard, 
-  AlertOctagon, 
-  ListRestart, 
-  Search, 
-  Sliders, 
-  LogOut, 
-  User 
-} from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 export const Sidebar: React.FC = () => {
@@ -17,75 +7,92 @@ export const Sidebar: React.FC = () => {
   const { user, logout } = useAuth();
   
   const navItems = [
-    { name: "Dashboard", path: "/", icon: LayoutDashboard },
-    { name: "Incidents", path: "/incidents", icon: AlertOctagon },
-    { name: "Search Logs", path: "/search", icon: Search },
-    { name: "Rules Engine", path: "/rules", icon: Sliders },
-    { name: "Attack Simulator", path: "/simulator", icon: ListRestart }
+    { name: "Dashboard", path: "/dashboard", code: "01" },
+    { name: "Incidents", path: "/incidents", code: "02" },
+    { name: "Search Logs", path: "/search", code: "03" },
+    { name: "Rules Engine", path: "/rules", code: "04" },
+    { name: "Attack Sim", path: "/simulator", code: "05" }
   ];
 
   const isActive = (path: string) => {
-    if (path === "/") {
-      return location.pathname === "/";
-    }
-    return location.pathname.startsWith(path);
+    return location.pathname === path || (path !== "/dashboard" && location.pathname.startsWith(path));
   };
 
   return (
-    <aside className="w-64 glass-card border-r border-darkBorder flex flex-col h-screen sticky top-0">
-      {/* Brand Logo Header */}
-      <div className="p-6 border-b border-darkBorder flex items-center gap-3">
-        <ShieldAlert className="w-8 h-8 text-red-500 animate-pulse" />
-        <div>
-          <h1 className="font-bold text-lg leading-none tracking-wider text-slate-100">SENTINELAI</h1>
-          <span className="text-[10px] text-slate-500 font-semibold tracking-widest uppercase">AI AUTONOMOUS SOC</span>
-        </div>
-      </div>
+    <aside className="w-64 bg-[#000000] border-r border-[#255325] flex flex-col h-screen sticky top-0 font-mono text-[13px] select-none shrink-0">
       
-      {/* Navigation Links */}
-      <nav className="flex-1 px-4 py-6 space-y-1">
+      {/* Brand Session Bar */}
+      <Link 
+        to="/" 
+        className="p-4 border-b border-[#255325] bg-[#000000] flex items-center justify-between group transition-colors hover:bg-[#255325]/20" 
+        title="Return to SentinelAI Manual"
+      >
+        <div>
+          <div className="font-bold text-[#ffffff] text-[15px] tracking-tight">
+            SENTINEL_AI
+          </div>
+          <div className="text-[11px] text-[#58ca58]">/ SYS_SOC_CONSOLE</div>
+        </div>
+        <span className="text-[10px] px-1.5 py-0.5 border border-[#66ff66] text-[#000000] bg-[#66ff66] font-medium">
+          [OK]
+        </span>
+      </Link>
+      
+      {/* Navigation Channels */}
+      <div className="flex-1 px-3 py-4 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
+        <div className="text-[11px] text-[#255325] px-2 pb-2 tracking-wider">
+          # TELEMETRY CHANNELS
+        </div>
         {navItems.map((item) => {
-          const Icon = item.icon;
           const active = isActive(item.path);
           return (
             <Link
               key={item.name}
               to={item.path}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
+              className={`flex items-center justify-between px-3 py-2 text-[13px] border transition-colors w-full select-none ${
                 active 
-                  ? "bg-blue-600/15 text-blue-400 border border-blue-500/30" 
-                  : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40 border border-transparent"
+                  ? "bg-[#66ff66] text-[#000000] border-[#66ff66] font-medium" 
+                  : "text-[#58ca58] hover:text-[#000000] hover:bg-[#66ff66] border-transparent"
               }`}
             >
-              <Icon className={`w-5 h-5 ${active ? "text-blue-400" : "text-slate-400"}`} />
-              {item.name}
+              <span className="flex items-center gap-2 truncate">
+                <span className={active ? "text-[#000000] font-bold" : "text-[#255325]"}>
+                  [{item.code}]
+                </span>
+                <span className="truncate">{item.name.toUpperCase()}</span>
+              </span>
+              <span className="text-[11px] font-bold shrink-0">
+                {active ? "▶" : "·"}
+              </span>
             </Link>
           );
         })}
-      </nav>
+      </div>
 
-      {/* User Information & Log out footer */}
-      <div className="p-4 border-t border-darkBorder flex flex-col gap-3">
+      {/* User Information & Session Termination Footer */}
+      <div className="p-3 border-t border-[#255325] flex flex-col gap-2.5 bg-[#000000]">
         {user && (
-          <div className="flex items-center gap-3 px-2 py-1">
-            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
-              <User className="w-4 h-4 text-slate-300" />
+          <div className="border border-[#255325] p-2 flex flex-col gap-0.5 text-[11px]">
+            <div className="text-[10px] text-[#255325] uppercase tracking-wider">
+              AUTHENTICATED_ANALYST
             </div>
-            <div className="flex flex-col">
-              <span className="text-xs font-semibold text-slate-300">{user.username}</span>
-              <span className="text-[10px] text-slate-500 capitalize">{user.role}</span>
+            <div className="text-[#ffffff] font-medium truncate">
+              {user.username}
+            </div>
+            <div className="text-[#58ca58] text-[10px]">
+              ROLE: {user.role.toUpperCase()}
             </div>
           </div>
         )}
         <button
           onClick={logout}
-          className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-950/20 border border-transparent hover:border-red-900/30 transition-all duration-200 w-full"
+          className="px-3 py-1.5 border border-[#255325] text-[#58ca58] hover:border-[#66ff66] hover:text-[#000000] hover:bg-[#66ff66] text-center font-medium transition-colors cursor-pointer text-[12px]"
         >
-          <LogOut className="w-5 h-5 text-red-400" />
-          Disconnect
+          [ ⏻ TERMINATE_SESSION ]
         </button>
       </div>
     </aside>
   );
 };
+
 export default Sidebar;

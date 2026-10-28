@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { Sliders, AlertTriangle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useNotifications } from "../context/NotificationContext";
 import { API_BASE } from "../config/api";
@@ -21,17 +20,19 @@ export const RulesManager: React.FC = () => {
   const { triggerNotification } = useNotifications();
   const [rules, setRules] = useState<Rule[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedType, setSelectedType] = useState<string>("ALL");
 
   useEffect(() => {
     fetchRules();
-  }, []);
+  }, [token]);
 
   const fetchRules = async () => {
     setLoading(true);
+    const activeToken = token || localStorage.getItem("token");
     try {
-      const resp = await fetch(`${API_BASE}/api/rules`, {
+      const resp = await fetch(`${API_BASE}/api/rules/`, {
         headers: {
-          "Authorization": `Bearer ${token}`
+          "Authorization": `Bearer ${activeToken}`
         }
       });
       if (resp.ok) {
@@ -87,116 +88,180 @@ export const RulesManager: React.FC = () => {
     }
   };
 
-  const getSeverityBg = (sev: string) => {
+  const getSeverityBadge = (sev: string) => {
     switch (sev.toUpperCase()) {
-      case "CRITICAL": return "text-red-400 bg-red-950/30 border-red-900/50";
-      case "HIGH": return "text-orange-400 bg-orange-950/30 border-orange-900/50";
-      case "WARNING": return "text-yellow-400 bg-yellow-950/30 border-yellow-900/50";
-      default: return "text-blue-400 bg-blue-950/30 border-blue-900/50";
+      case "CRITICAL":
+        return <span className="bg-[#66ff66] text-[#000000] font-bold px-1.5 py-0.5 select-none">[CRITICAL]</span>;
+      case "HIGH":
+        return <span className="text-[#ffffff] border border-[#66ff66] px-1.5 py-0.5 select-none">[HIGH]</span>;
+      case "WARNING":
+        return <span className="text-[#66ff66] border border-[#255325] px-1.5 py-0.5 select-none">[WARNING]</span>;
+      default:
+        return <span className="text-[#58ca58] border border-[#255325] px-1.5 py-0.5 select-none">[INFO]</span>;
     }
   };
 
   const ruleTypes = ["Windows", "Linux", "Apache", "Firewall"];
+  const filteredRules = selectedType === "ALL" ? rules : rules.filter(r => r.rule_type === selectedType);
 
   return (
-    <div className="flex-1 p-8 space-y-8 overflow-y-auto h-screen max-w-[calc(100vw-16rem)]">
+    <div className="flex-1 min-w-0 p-6 space-y-6 overflow-y-auto h-screen bg-[#000000] text-[#66ff66] font-mono select-text">
       
-      {/* Title */}
-      <div className="flex justify-between items-center border-b border-darkBorder pb-6">
-        <div>
-          <h2 className="text-3xl font-extrabold text-slate-100 tracking-wide flex items-center gap-3">
-            <Sliders className="w-8 h-8 text-blue-500" />
-            SIEM RULES ENGINE
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Enable or disable individual inspection signatures and adjust detection severities
-          </p>
+      {/* Top Command Session Bar & Title */}
+      <div className="border border-[#255325] p-4 bg-[#000000]">
+        <div className="flex items-center justify-between text-[13px] border-b border-[#255325] pb-2 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[#255325] select-none">[00]</span>
+            <span className="text-[#66ff66]">
+              <span className="text-[#58ca58]">sentinel@soc:~$</span> sentinel --engine rules --inspect active-heuristics --policy strict
+            </span>
+          </div>
+          <span className="px-2 py-0.5 bg-[#66ff66] text-[#000000] font-medium text-[11px] select-none">
+            [ CHANNEL: 04 // RULES_ENGINE ]
+          </span>
+        </div>
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+          <div>
+            <h1 className="text-[22px] sm:text-[26px] font-medium text-[#ffffff] tracking-tight uppercase">
+              Detection Rules Engine // SIEM &amp; MITRE Matrix
+            </h1>
+            <p className="text-[14px] text-[#58ca58] mt-1">
+              Deterministic threshold policies, regular expression patterns, and behavioral correlation triggers across all assets.
+            </p>
+          </div>
+          <div className="text-[12px] text-[#58ca58] text-right font-mono shrink-0">
+            <div>LOADED_RULES: <span className="text-[#ffffff]">{rules.length} ACTIVE_DEFINITIONS</span></div>
+            <div>STATUS: <span className="text-[#66ff66]">HOT_RELOAD_ENABLED</span></div>
+          </div>
         </div>
       </div>
 
-      {/* Permissions Banner */}
+      {/* Permissions Callout (If Analyst) */}
       {!isAdmin && (
-        <div className="p-4 rounded-xl bg-orange-950/20 border border-orange-900/40 text-orange-200 text-xs flex gap-3 items-center">
-          <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0" />
-          <span>
-            You are logged in with the <strong>Analyst</strong> role. You can review active detection rules, but you are not authorized to toggle them. Switch accounts to Admin to edit settings.
-          </span>
+        <div className="border border-[#255325] p-3 bg-[#255325]/10 text-[12px] text-[#58ca58] flex items-center justify-between">
+          <div>
+            <span className="text-[#ffffff] font-medium">[ ! ] PERMISSION_RESTRICTION:</span> Authenticated as <strong>Analyst</strong> (Read-Only). Root administrative privilege is required to toggle SIEM rules.
+          </div>
+          <span className="text-[#255325] select-none">[EACCES]</span>
         </div>
       )}
 
-      {/* Main Content Grid */}
-      {loading ? (
-        <div className="py-12 text-center text-slate-400 font-medium">Loading rules database...</div>
-      ) : (
-        <div className="space-y-12">
+      {/* Filter Category Tabs */}
+      <div>
+        <div className="text-[12px] text-[#255325] mb-2 select-none">
+          [01] $ sentinel --rules-filter --category "{selectedType.toLowerCase()}"
+        </div>
+
+        <div className="border border-[#255325] p-2 bg-[#000000] flex flex-wrap gap-2 text-[12px]">
+          <button
+            onClick={() => setSelectedType("ALL")}
+            className={`px-3 py-1 border transition-colors select-none ${
+              selectedType === "ALL"
+                ? "bg-[#66ff66] text-[#000000] border-[#66ff66] font-medium"
+                : "border-[#255325] text-[#58ca58] hover:text-[#ffffff] hover:border-[#66ff66]"
+            }`}
+          >
+            [ ALL ({rules.length}) ]
+          </button>
           {ruleTypes.map((type) => {
-            const filteredRules = rules.filter(r => r.rule_type === type);
-            if (filteredRules.length === 0) return null;
-
+            const count = rules.filter(r => r.rule_type === type).length;
+            const isSelected = selectedType === type;
             return (
-              <div key={type} className="space-y-4">
-                <div className="flex items-center gap-2 border-b border-darkBorder pb-2">
-                  <h3 className="text-lg font-bold text-slate-200 tracking-wide">{type} Signature Pack</h3>
-                  <span className="bg-slate-900 border border-darkBorder text-[10px] text-slate-400 font-bold px-2 py-0.5 rounded-full font-mono">
-                    {filteredRules.length} rules
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {filteredRules.map((rule) => (
-                    <div 
-                      key={rule.id}
-                      className={`glass-card rounded-xl p-5 border flex flex-col justify-between h-48 transition-all ${
-                        rule.is_enabled ? "border-slate-800" : "border-slate-900/60 opacity-60"
-                      }`}
-                    >
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-start">
-                          <span className="font-mono text-[10px] text-slate-500 font-semibold uppercase">ID: RULE-{rule.id}</span>
-                          <span className={`px-2 py-0.5 rounded border text-[9px] font-bold ${getSeverityBg(rule.severity)}`}>
-                            {rule.severity}
-                          </span>
-                        </div>
-                        <h4 className="font-bold text-sm text-slate-200">{rule.name}</h4>
-                        <p className="text-xs text-slate-400 leading-normal line-clamp-2">{rule.description}</p>
-                      </div>
-
-                      <div className="border-t border-darkBorder/60 pt-3 mt-4 flex justify-between items-center text-xs">
-                        <div className="flex gap-4 font-mono text-[10px] text-slate-500">
-                          <div><span className="text-slate-600">Tactic:</span> {rule.tactic}</div>
-                          <div><span className="text-slate-600">ID:</span> {rule.technique}</div>
-                        </div>
-
-                        {/* Switch button */}
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-bold uppercase tracking-wider ${rule.is_enabled ? "text-emerald-400" : "text-slate-500"}`}>
-                            {rule.is_enabled ? "Active" : "Disabled"}
-                          </span>
-                          <button
-                            onClick={() => handleToggleRule(rule.id, rule.is_enabled)}
-                            className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer relative ${
-                              rule.is_enabled ? "bg-emerald-500" : "bg-slate-800"
-                            }`}
-                          >
-                            <div 
-                              className={`w-4 h-4 bg-white rounded-full transition-transform transform ${
-                                rule.is_enabled ? "translate-x-4" : "translate-x-0"
-                              }`}
-                            />
-                          </button>
-                        </div>
-                      </div>
-
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <button
+                key={type}
+                onClick={() => setSelectedType(type)}
+                className={`px-3 py-1 border transition-colors select-none ${
+                  isSelected
+                    ? "bg-[#66ff66] text-[#000000] border-[#66ff66] font-medium"
+                    : "border-[#255325] text-[#58ca58] hover:text-[#ffffff] hover:border-[#66ff66]"
+                }`}
+              >
+                [ {type.toUpperCase()} ({count}) ]
+              </button>
             );
           })}
         </div>
-      )}
+      </div>
+
+      {/* Rules Grid */}
+      <div>
+        <div className="text-[12px] text-[#255325] mb-2 select-none">
+          [02] $ sentinel --render rules-catalog --count {filteredRules.length}
+        </div>
+
+        {loading ? (
+          <div className="border border-[#255325] p-12 text-center text-[#58ca58] font-mono text-[13px] bg-[#000000]">
+            &gt; Querying detection rules database...
+          </div>
+        ) : filteredRules.length === 0 ? (
+          <div className="border border-[#255325] p-12 text-center text-[#255325] font-mono text-[13px] bg-[#000000]">
+            [ - ] No rules registered under this category.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredRules.map((rule) => (
+              <div
+                key={rule.id}
+                className={`border p-4 bg-[#000000] flex flex-col justify-between transition-colors ${
+                  rule.is_enabled 
+                    ? "border-[#255325] hover:border-[#66ff66]" 
+                    : "border-[#255325]/50 opacity-60"
+                }`}
+              >
+                <div className="space-y-3">
+                  <div className="flex justify-between items-start border-b border-[#255325] pb-2 text-[11px]">
+                    <span className="text-[#255325] font-mono font-medium">
+                      RULE #{rule.id} // [{rule.rule_type.toUpperCase()}]
+                    </span>
+                    {getSeverityBadge(rule.severity)}
+                  </div>
+
+                  <div>
+                    <h3 className="font-medium text-[#ffffff] text-[14px]">
+                      {rule.name}
+                    </h3>
+                    <p className="text-[12px] text-[#58ca58] mt-1 leading-relaxed">
+                      {rule.description}
+                    </p>
+                  </div>
+
+                  {rule.condition_pattern && (
+                    <div className="bg-[#255325]/10 border border-[#255325] p-2 text-[10px] text-[#66ff66] font-mono truncate">
+                      <span className="text-[#255325]">REGEX: </span>
+                      {rule.condition_pattern}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-[#255325] pt-3 mt-4 flex justify-between items-center text-[11px]">
+                  <div className="flex gap-3 text-[#58ca58]">
+                    <span>TACTIC: <strong className="text-[#ffffff]">{rule.tactic}</strong></span>
+                    <span>TECHNIQUE: <strong className="text-[#66ff66]">{rule.technique}</strong></span>
+                  </div>
+
+                  <button
+                    onClick={() => handleToggleRule(rule.id, rule.is_enabled)}
+                    disabled={!isAdmin}
+                    className={`px-2.5 py-1 text-[11px] font-medium border transition-colors select-none ${
+                      !isAdmin 
+                        ? "border-[#255325] text-[#255325] cursor-not-allowed"
+                        : rule.is_enabled
+                          ? "bg-[#66ff66] text-[#000000] border-[#66ff66] hover:bg-[#ffffff] cursor-pointer"
+                          : "border-[#255325] text-[#58ca58] hover:text-[#66ff66] hover:border-[#66ff66] cursor-pointer"
+                    }`}
+                  >
+                    {rule.is_enabled ? "[ ◉ ACTIVE ]" : "[ ○ DISABLED ]"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
     </div>
   );
 };
+
 export default RulesManager;

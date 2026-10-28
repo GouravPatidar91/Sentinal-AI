@@ -71,6 +71,7 @@ class Incident(Base):
     # Relationships
     assigned_analyst = relationship("User", back_populates="assigned_incidents")
     events = relationship("IncidentEvent", back_populates="incident", cascade="all, delete-orphan", order_by="IncidentEvent.order_index")
+    soar_actions = relationship("SOARAction", back_populates="incident", cascade="all, delete-orphan")
 
 class IncidentEvent(Base):
     __tablename__ = "incident_events"
@@ -87,3 +88,23 @@ class IncidentEvent(Base):
     incident = relationship("Incident", back_populates="events")
     log_entry = relationship("LogEntry", back_populates="incident_events")
     rule = relationship("DetectionRule", back_populates="incident_events")
+
+class SOARAction(Base):
+    __tablename__ = "soar_actions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True)
+    action_type = Column(String, index=True, nullable=False)  # KILL_PROCESS, BLOCK_IP, QUARANTINE_INTERFACE, DISABLE_USER
+    target_host = Column(String, index=True, nullable=False)
+    payload = Column(String, nullable=False)  # PID, IP address, Interface name, Username
+    description = Column(Text, nullable=False)
+    status = Column(String, index=True, default="PENDING")  # PENDING, APPROVED, EXECUTED, FAILED, REJECTED
+    executed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    output = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    executed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    incident = relationship("Incident", back_populates="soar_actions")
+    executed_by = relationship("User")
+
